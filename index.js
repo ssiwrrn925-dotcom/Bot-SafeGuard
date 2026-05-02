@@ -1,29 +1,28 @@
-const {
-  Client,
-  GatewayIntentBits,
-  PermissionsBitField,
-  EmbedBuilder
+const { 
+  Client, 
+  GatewayIntentBits, 
+  PermissionsBitField, 
+  EmbedBuilder 
 } = require("discord.js");
-
 const express = require("express");
-const app = express();
 
-// =====================
-// 🌐 WEB SERVER (สำหรับ Render)
-// =====================
+// ==========================================
+// 🌐 ส่วนที่ 1: WEB SERVER (ป้องกัน Render ปิดบอท)
+// ==========================================
+const app = express();
 const PORT = process.env.PORT || 10000;
 
 app.get("/", (req, res) => {
-  res.send("Bot-SafeGuard is Online and Healthy! 🛡️");
+  res.send("🛡️ SafeGuard Bot is running 24/7!");
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🌐 Web Server starts on port ${PORT}`);
+  console.log(`📡 Web Server is ready on port ${PORT}`);
 });
 
-// =====================
-// 🤖 CLIENT SETUP
-// =====================
+// ==========================================
+// 🤖 ส่วนที่ 2: ตั้งค่า Discord Bot
+// ==========================================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -33,9 +32,7 @@ const client = new Client({
   ]
 });
 
-// =====================
-// 📌 CONFIG (ดึงจาก Environment ของ Render)
-// =====================
+// ดึงข้อมูลจาก Environment Variables ใน Render
 const token = process.env.TOKEN;
 const LOG_CHANNEL_ID = "1499134140841197628";
 const QUARANTINE_ROLE_ID = "1496547872701943958";
@@ -43,30 +40,28 @@ const QUARANTINE_ROLE_ID = "1496547872701943958";
 const spamMap = new Map();
 let globalSpamAlert = false;
 
-// =====================
-// 📊 LOG FUNCTION
-// =====================
-function sendLog(guild, member, reason, channel) {
+// ฟังก์ชันส่ง Log
+async function sendLog(guild, member, reason, channel) {
   const log = guild.channels.cache.get(LOG_CHANNEL_ID);
   if (!log) return;
 
   const embed = new EmbedBuilder()
-    .setTitle("🚫 Anti-Spam System")
+    .setTitle("🚫 Anti-Spam Alert")
     .setColor("Red")
     .addFields(
-      { name: "👤 ผู้ใช้", value: `${member.user.tag} (${member.id})` },
-      { name: "📌 เหตุผล", value: reason },
-      { name: "💬 ห้อง", value: `<#${channel.id}>` },
-      { name: "⏰ เวลา", value: new Date().toLocaleString("th-TH") }
+      { name: "👤 User", value: `${member.user.tag} (${member.id})` },
+      { name: "📌 Reason", value: reason },
+      { name: "💬 Channel", value: `<#${channel.id}>` },
+      { name: "⏰ Time", value: new Date().toLocaleString("th-TH") }
     )
     .setTimestamp();
 
-  log.send({ embeds: [embed] }).catch(err => console.error("Log error:", err.message));
+  log.send({ embeds: [embed] }).catch(() => {});
 }
 
-// =====================
-// 🚫 ANTI SPAM LOGIC
-// =====================
+// ==========================================
+// 🚫 ส่วนที่ 3: ระบบ ANTI-SPAM (Logic)
+// ==========================================
 client.on("messageCreate", async (msg) => {
   if (!msg.guild || msg.author.bot) return;
 
@@ -80,7 +75,7 @@ client.on("messageCreate", async (msg) => {
 
   const data = spamMap.get(id);
 
-  // Reset ข้อมูลถ้าผ่านไป 4 วินาทีแล้วไม่มีการส่งต่อ
+  // Reset ข้อมูลถ้าทิ้งช่วงเกิน 4 วินาที
   if (Date.now() - data.last > 4000) {
     data.count = 0;
     data.msgs = [];
@@ -90,68 +85,54 @@ client.on("messageCreate", async (msg) => {
   data.last = Date.now();
   data.msgs.push(msg);
 
+  // เก็บประวัติข้อความแค่ 10 ข้อความล่าสุด
   if (data.msgs.length > 10) data.msgs.shift();
+
+  // ตรวจสอบความถี่ (5 ข้อความภายใน 5 วินาที)
   const recent = data.msgs.filter(m => Date.now() - m.createdTimestamp < 5000);
 
-  // 🚨 ตรวจพบการสแปม (5 ข้อความใน 5 วินาที)
   if (recent.length >= 5) {
     try {
-      // 🧨 ลบข้อความสแปม
-      const deletable = data.msgs
-        .filter(m => m && !m.deleted)
-        .filter(m => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000)
-        .slice(0, 100);
-
+      // 1. ลบข้อความที่สแปม
+      const deletable = data.msgs.filter(m => m && !m.deleted);
       await msg.channel.bulkDelete(deletable, true).catch(() => {});
 
-      // 🚫 ใส่ยศกักบริเวณ
-      await member.roles.add(QUARANTINE_ROLE_ID, "Spam detected").catch(err => 
-        console.error("Role Error:", err.message)
-      );
+      // 2. ให้ยศกักบริเวณ
+      await member.roles.add(QUARANTINE_ROLE_ID).catch(e => console.log("Role Error:", e.message));
 
-      // 🚨 ส่งข้อความเตือนในห้อง (จำกัดการแจ้งเตือนไม่ให้รกเกินไป)
+      // 3. แจ้งเตือนในห้อง (จำกัด 1 ครั้งต่อนาทีไม่ให้บอทสแปมเอง)
       if (!globalSpamAlert) {
         globalSpamAlert = true;
-        msg.channel.send(`🚫 **ตรวจพบการสแปม** → ${member} (${member.user.tag}) ถูกกักบริเวณแล้ว`).catch(() => {});
+        msg.channel.send(`🚫 **ตรวจพบสแปม!** ${member} ถูกกักบริเวณชั่วคราว`).catch(() => {});
         setTimeout(() => { globalSpamAlert = false; }, 60000);
       }
 
-      // 📊 ส่ง Log ไปยังห้องที่ตั้งไว้
-      sendLog(msg.guild, member, "Spam detected (5+ messages/5s)", msg.channel);
+      // 4. ส่ง Log
+      sendLog(msg.guild, member, "Spamming detected (5+ messages/5s)", msg.channel);
+      
+      // ล้างข้อมูลผู้ใช้คนนี้หลังโดนลงโทษ
+      spamMap.delete(id);
     } catch (err) {
-      console.log("Anti-spam error:", err.message);
+      console.log("System Error:", err.message);
     }
   }
-
-  // ล้าง Memory เมื่อผ่านไป 1 นาที
-  setTimeout(() => {
-    if(spamMap.has(id)) spamMap.delete(id);
-  }, 60000);
 });
 
-// =====================
-// 🚀 READY
-// =====================
+// ==========================================
+// 🚀 ส่วนที่ 4: เริ่มต้นทำงาน
+// ==========================================
 client.once("ready", () => {
   console.log("------------------------------------");
-  console.log(`🛡  ONLINE: ${client.user.tag}`);
-  console.log("🛡  SAFE GUARD STATUS: READY");
+  console.log(`🛡️  SYSTEM ONLINE: ${client.user.tag}`);
+  console.log(`📊  Monitoring ${client.guilds.cache.size} Servers`);
   console.log("------------------------------------");
 });
 
-// =====================
-// 🔑 LOGIN
-// =====================
-console.log("🚀 Starting login process...");
-
 if (!token) {
-  console.error("❌ ERROR: TOKEN is missing in Render Environment Variables!");
-  process.exit(1);
+  console.error("❌ ERROR: TOKEN is missing in Environment Variables!");
 } else {
-  client.login(token)
-    .then(() => console.log("✅ [SUCCESS] Discord Login Resolved"))
-    .catch(err => {
-      console.error("❌ [LOGIN FAILED]");
-      console.error(err.message);
-    });
+  client.login(token).catch(err => {
+    console.error("❌ FAILED TO LOGIN:");
+    console.error(err.message);
+  });
 }

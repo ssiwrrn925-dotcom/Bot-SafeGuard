@@ -5,7 +5,9 @@ const {
   EmbedBuilder
 } = require("discord.js");
 
-const { token } = require("./config.json");
+// เปลี่ยนจาก require("./config.json") เป็นการดึงค่าจาก Environment Variable
+// เพื่อแก้ปัญหา Error ใน image_a57359.png และ image_a572c4.png
+const token = process.env.TOKEN; 
 
 // =====================
 // 🤖 CLIENT
@@ -93,7 +95,9 @@ client.on("messageCreate", async (msg) => {
         .filter(m => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000)
         .slice(0, 100);
 
-      await msg.channel.bulkDelete(deletable, true).catch(() => {});
+      if (deletable.length > 0) {
+        await msg.channel.bulkDelete(deletable, true).catch(() => {});
+      }
 
       // 🚫 ใส่ยศกัก
       await member.roles.add(QUARANTINE_ROLE_ID, "Spam detected").catch(() => {});
@@ -115,10 +119,11 @@ client.on("messageCreate", async (msg) => {
       sendLog(msg.guild, member, "Spam detected (bulk delete)", msg.channel);
 
     } catch (err) {
-      console.log("Error:", err.message);
+      console.log("Error logic:", err.message);
     }
   }
 
+  // ล้าง data ออกจากหน่วยความจำเมื่อผ่านไป 1 นาที
   setTimeout(() => spamMap.delete(id), 60000);
 });
 
@@ -126,7 +131,12 @@ client.on("messageCreate", async (msg) => {
 // 🚀 READY
 // =====================
 client.once("ready", () => {
-  console.log("🛡 SAFE GUARD FULL NAME DISPLAY ONLINE");
+  console.log(`🛡 ${client.user.tag} ONLINE & PROTECTING`);
 });
 
-client.login(token);
+// ตรวจสอบว่ามี Token หรือไม่ก่อนรัน
+if (token) {
+  client.login(token).catch(err => console.error("Login Error:", err.message));
+} else {
+  console.error("ERROR: No TOKEN found in Environment Variables!");
+}

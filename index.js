@@ -22,12 +22,14 @@ app.listen(PORT, "0.0.0.0", () => {
 });
 
 // =====================
-// 🔐 TOKEN
+// 🔐 TOKEN (DEBUG สำคัญ)
 // =====================
 const token = process.env.TOKEN;
 
+console.log("🔍 TOKEN CHECK:", token ? "FOUND ✅" : "MISSING ❌");
+
 if (!token) {
-  console.error("❌ TOKEN missing");
+  console.error("❌ TOKEN missing → ไปใส่ใน Render ก่อน");
   process.exit(1);
 }
 

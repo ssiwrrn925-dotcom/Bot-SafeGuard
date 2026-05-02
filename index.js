@@ -1,92 +1,99 @@
-const { Client, GatewayIntentBits, PermissionsBitField, EmbedBuilder, AuditLogEvent } = require("discord.js");
+const { Client, GatewayIntentBits, EmbedBuilder, AuditLogEvent, PermissionsBitField } = require("discord.js");
 
 const client = new Client({
   intents: [
-    GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, 
+    GatewayIntentBits.Guilds, 
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildModeration
   ]
 });
 
-const TOKEN = process.env.TOKEN;
-const LOG_CHANNEL_ID = "1499134140841197628"; 
-const QUARANTINE_ROLE_ID = "1496547872701943958"; 
+// --- การตั้งค่าระบบป้องกัน ---
+const TOKEN = process.env.TOKEN; 
+const LOG_CHANNEL_ID = "1499134140841197628"; // ห้องส่ง Log และแท็กประจาน
+const QUARANTINE_ROLE_ID = "1496547872701943958"; // ยศสำหรับกักบริเวณคนดึงบอท
 
 // รายชื่อบอทที่อนุญาต (Whitelist)
-const whitelistedBots = ["411916947773587456", "1369921212062629939", "493716749342998541", "788814313930096662", "491769129318088714", "292953664492929025", "240254129333731328", "275813801792634880"];
+const whitelistedBots = [
+  "411916947773587456", "1369921212062629939", "493716749342998541", 
+  "788814313930096662", "491769129318088714", "292953664492929025", 
+  "240254129333731328", "275813801792634880"
+];
 
-// 📊 ฟังก์ชันรายงานพร้อมแท็กชื่อผู้กระทำผิด
-async function reportViolator(guild, botUser, executor, actionType) {
+// --- ฟังก์ชันหลักในการกำจัดบอทและลงโทษคน ---
+
+async function guardianSystem(target, actionType, name) {
+  const guild = target.guild;
   const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID);
-  if (!logChannel) return;
 
-  const embed = new EmbedBuilder()
-    .setTitle("🛡️ ยับยั้งการป่วนเซิร์ฟเวอร์")
-    .setDescription(`**เหตุการณ์:** พยายามสร้าง ${actionType}\n**สถานะ:** ลบสิ่งที่สร้างและแบนบอทแล้ว`)
-    .addFields(
-      { name: "🤖 บอทที่ป่วน", value: `<@${botUser.id}>`, inline: true },
-      { name: "👤 คนดึงบอทมา", value: `<@${executor.id}>`, inline: true }
-    )
-    .setColor("Red")
-    .setTimestamp();
+  // 1. ลบสิ่งที่บอทสแปมสร้างทิ้งทันที
+  await target.delete().catch(() => {});
 
-  logChannel.send({ 
-    content: `🚨 **แจ้งเตือนความปลอดภัย:** <@${executor.id}> คุณถูกกักบริเวณเนื่องจากดึงบอท <@${botUser.id}> มาสร้างความวุ่นวาย`, 
-    embeds: [embed] 
-  }).catch(() => {});
-}
-
-// 🔨 ฟังก์ชันลงโทษคู่ (แบนบอทแปลกหน้า + กักบริเวณคนดึง)
-async function punishSystem(guild, botId, actionType) {
-  if (whitelistedBots.includes(botId)) return;
-
-  const botMember = await guild.members.fetch(botId).catch(() => null);
-  if (!botMember || !botMember.user.bot) return;
-
-  // 1. หาคนดึงบอทตัวนี้เข้ามา
-  const botAudit = await guild.fetchAuditLogs({ limit: 10, type: AuditLogEvent.BotAdd }).catch(() => null);
-  const botEntry = botAudit?.entries.find(e => e.target.id === botId);
-  const inviterId = botEntry ? botEntry.executor.id : null;
-
-  // 2. แบนบอททันที
-  await botMember.ban({ reason: `บอทแปลกหน้าพยายามสร้าง ${actionType}` }).catch(() => {});
-
-  // 3. กักบริเวณคนดึง (ถ้าไม่ใช่ Admin)
-  if (inviterId) {
-    const executorMember = await guild.members.fetch(inviterId).catch(() => null);
-    if (executorMember && !executorMember.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      const roles = executorMember.roles.cache.filter(r => r.name !== "@everyone" && !r.managed);
-      await executorMember.roles.remove(roles).catch(() => {});
-      await executorMember.roles.add(QUARANTINE_ROLE_ID).catch(() => {});
-      
-      await reportViolator(guild, botMember.user, executorMember.user, actionType);
-    }
-  }
-}
-
-// 🛡️ ระบบตรวจจับ Action จากบอท (ห้อง/ยศ/เธรด)
-const handleBotAction = async (target, type) => {
-  // รอข้อมูล Audit Log แปปเดียว
   setTimeout(async () => {
-    const audit = await target.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent[type] }).catch(() => null);
-    const entry = audit?.entries.first();
-    if (!entry) return;
+    try {
+      const audit = await guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent[actionType] }).catch(() => null);
+      const entry = audit?.entries.first();
+      if (!entry) return;
 
-    const { executor } = entry;
+      const { executor } = entry;
 
-    // ถ้าผู้ทำเป็นบอท และไม่อยู่ใน Whitelist
-    if (executor.bot && !whitelistedBots.includes(executor.id)) {
-      // ลบสิ่งที่บอทสร้างทันที
-      await target.delete().catch(() => {});
-      // ลงโทษ
-      await punishSystem(target.guild, executor.id, type);
-    }
+      // ตรวจสอบว่าเป็นบอทแปลกหน้า (ไม่อยู่ใน Whitelist)
+      if (executor.bot && !whitelistedBots.includes(executor.id)) {
+        
+        // 2. แบนบอทตัวป่วนทันที
+        const botMember = await guild.members.fetch(executor.id).catch(() => null);
+        if (botMember) {
+          await botMember.ban({ reason: `Anti-Raid: พยายามสร้าง ${name}` }).catch(() => {
+            console.log(`[!] ไม่สามารถแบน ${executor.tag} ได้ (ตรวจสอบลำดับยศบอท)`);
+          });
+        }
+
+        // 3. สืบหาคนดึงบอท (Inviter) จาก Audit Log
+        const botAddLog = await guild.fetchAuditLogs({ limit: 5, type: AuditLogEvent.BotAdd }).catch(() => null);
+        const inviterEntry = botAddLog?.entries.find(e => e.target.id === executor.id);
+        const inviter = inviterEntry ? inviterEntry.executor : null;
+
+        // 4. ลงโทษคนดึงบอท (กักบริเวณ)
+        if (inviter) {
+          const inviterMember = await guild.members.fetch(inviter.id).catch(() => null);
+          if (inviterMember && !inviterMember.permissions.has(PermissionsBitField.Flags.Administrator)) {
+            // ถอดยศเดิมทั้งหมดและใส่ยศกักบริเวณตาม ID ที่แจ้งมา
+            await inviterMember.roles.set([QUARANTINE_ROLE_ID]).catch(() => {});
+          }
+        }
+
+        // 5. ส่ง Log แจ้งเตือนและแท็กชื่อคนดึง
+        if (logChannel) {
+          const embed = new EmbedBuilder()
+            .setTitle("🛡️ ตรวจพบการพยายามป่วนเซิร์ฟเวอร์")
+            .setColor("#ff0000")
+            .setDescription(`**สิ่งที่เกิดขึ้น:** พยายามสร้าง ${name}\n**บอทผู้กระทำ:** <@${executor.id}>\n**คนดึงบอทเข้า:** ${inviter ? `<@${inviter.id}>` : "ไม่พบข้อมูล"}`)
+            .addFields(
+              { name: "ผลการดำเนินการ", value: "🗑️ ลบสิ่งที่สร้าง\n🔨 แบนบอทป่วน\n🔒 กักบริเวณคนดึง" }
+            )
+            .setTimestamp();
+
+          logChannel.send({ 
+            content: `🚨 **แจ้งเตือนความปลอดภัย:** <@${inviter?.id || 'everyone'}> บอทที่คุณดึงมาพยายามป่วนเซิร์ฟเวอร์ คุณถูกกักบริเวณเรียบร้อยแล้ว`, 
+            embeds: [embed] 
+          }).catch(() => {});
+        }
+      }
+    } catch (e) { console.error(e); }
   }, 1000);
-};
+}
 
-// 🔴 สั่งงาน: บอทสร้างอะไร ลบทิ้งและแบนทันที
-client.on("channelCreate", c => handleBotAction(c, "ChannelCreate"));
-client.on("roleCreate", r => handleBotAction(r, "RoleCreate"));
-client.on("threadCreate", t => handleBotAction(t, "ThreadCreate")); // กันบอทสร้างเธรด
+// --- การเฝ้าระวัง Action ต่างๆ ---
 
-client.once("ready", () => console.log(`🛡️ ${client.user.tag} : เฝ้าระวังเธรด/ห้อง/ยศ พร้อมแท็กคนทำ!`));
+client.on("threadCreate", (t) => guardianSystem(t, "ThreadCreate", "เธรด (Thread)"));
+client.on("channelCreate", (c) => guardianSystem(c, "ChannelCreate", "ห้อง (Channel)"));
+client.on("roleCreate", (r) => guardianSystem(r, "RoleCreate", "ยศ (Role)"));
+
+client.once("ready", () => {
+  console.log(`🛡️ Guardian Bot Online: ${client.user.tag}`);
+  console.log(`📡 Log Channel: ${LOG_CHANNEL_ID}`);
+  console.log(`🔒 Quarantine Role: ${QUARANTINE_ROLE_ID}`);
+});
+
 client.login(TOKEN);

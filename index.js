@@ -5,27 +5,25 @@ const {
   EmbedBuilder
 } = require("discord.js");
 
-// 🌐 Web server (กัน Render หลับ)
+// 🌐 แก้ปัญหา Render (ต้องมี port)
 const express = require("express");
 const app = express();
 
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
-  res.send("🟢 Bot is running!");
+  res.send("Bot is running!");
 });
 
 app.listen(PORT, () => {
   console.log(`🌐 Server running on port ${PORT}`);
 });
 
-// =====================
-// 🔐 ENV
-// =====================
+// 🔐 ใช้ ENV แทน config.json
 const token = process.env.TOKEN;
 
 if (!token) {
-  console.error("❌ ไม่พบ TOKEN ใน Environment Variables");
+  console.error("❌ TOKEN หาย ไปตั้งใน Render");
   process.exit(1);
 }
 
@@ -51,7 +49,7 @@ const QUARANTINE_ROLE_ID =
   process.env.QUARANTINE_ROLE_ID || "1496547872701943958";
 
 // =====================
-// 📊 DATA
+// 📌 DATA
 // =====================
 const spamMap = new Map();
 let globalSpamAlert = false;
@@ -114,38 +112,25 @@ client.on("messageCreate", async (msg) => {
     try {
       const deletable = data.msgs
         .filter((m) => m && !m.deleted)
-        .filter(
-          (m) =>
-            Date.now() - m.createdTimestamp <
-            14 * 24 * 60 * 60 * 1000
-        )
         .slice(0, 100);
 
       await msg.channel.bulkDelete(deletable, true).catch(() => {});
-      await member.roles
-        .add(QUARANTINE_ROLE_ID, "Spam detected")
-        .catch(() => {});
+      await member.roles.add(QUARANTINE_ROLE_ID).catch(() => {});
 
       if (!globalSpamAlert) {
         globalSpamAlert = true;
 
-        msg.channel
-          .send(
-            `🚫 ตรวจพบการสแปม → ${member} (${member.user.tag}) ถูกกักบริเวณ`
-          )
-          .catch(() => {});
+        msg.channel.send(
+          `🚫 ตรวจพบการสแปม → ${member} (${member.user.tag}) ถูกกักบริเวณ`
+        ).catch(() => {});
 
         setTimeout(() => {
           globalSpamAlert = false;
         }, 60000);
       }
 
-      sendLog(
-        msg.guild,
-        member,
-        "Spam detected (bulk delete)",
-        msg.channel
-      );
+      sendLog(msg.guild, member, "Spam detected", msg.channel);
+
     } catch (err) {
       console.log("Error:", err.message);
     }
@@ -158,16 +143,12 @@ client.on("messageCreate", async (msg) => {
 // 🚀 READY
 // =====================
 client.once("ready", () => {
-  console.log(`🛡 SAFE GUARD ONLINE: ${client.user.tag}`);
+  console.log(`🛡 ONLINE: ${client.user.tag}`);
 });
 
-// =====================
-// 💥 ERROR HANDLER
-// =====================
+// 💥 กันบอทดับ
 process.on("unhandledRejection", console.error);
 process.on("uncaughtException", console.error);
 
-// =====================
 // 🔑 LOGIN
-// =====================
 client.login(token);

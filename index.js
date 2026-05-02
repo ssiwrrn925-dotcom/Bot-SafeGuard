@@ -1,13 +1,13 @@
 const http = require("http");
 const { Client, GatewayIntentBits, PermissionsBitField, EmbedBuilder } = require("discord.js");
 
-// 🌐 1. Keep-Alive Server (สำหรับ Render)
+// 🌐 1. สร้าง Server เพื่อแก้ปัญหา Port Timeout ใน Render
 http.createServer((req, res) => {
   res.write("Bot is running!");
   res.end();
 }).listen(8080);
 
-// 🤖 2. ตั้งค่าบอท
+// 🤖 2. ตั้งค่าบอทและ Intents
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -21,36 +21,51 @@ const TOKEN = process.env.TOKEN;
 const LOG_CHANNEL_ID = "1499134140841197628";
 const QUARANTINE_ROLE_ID = "1496547872701943958";
 
-// 📊 3. ระบบส่ง Log
+// ⚪️ รายชื่อ ID บอทที่อนุญาต (Whitelist) - บอทเหล่านี้จะสแปมได้ไม่โดนจัดการ
+const whitelistedBots = [
+  "411916947773587456",
+  "1369921212062629939",
+  "493716749342998541",
+  "788814313930096662",
+  "491769129318088714",
+  "292953664492929025",
+  "240254129333731328",
+  "275813801792634880"
+];
+
+// 📊 3. ระบบส่ง Log แจ้งเตือน
 function sendLog(guild, member, reason, channel) {
   const log = guild.channels.cache.get(LOG_CHANNEL_ID);
   if (!log) return;
   const embed = new EmbedBuilder()
-    .setTitle("🚫 Anti-Spam: ถอดยศเสร็จสิ้น")
-    .setColor("Red")
+    .setTitle("🚨 ระบบป้องกันสแปม: ดำเนินการขั้นเด็ดขาด")
+    .setColor("DarkRed")
     .addFields(
-      { name: "👤 ผู้ใช้", value: `${member.user.tag} (${member.id})` },
+      { name: "👤 ผู้กระทำ", value: `${member.user.tag} ${member.user.bot ? "🤖 (BOT)" : "👤 (USER)"}` },
       { name: "📌 การดำเนินการ", value: "ถอดยศทั้งหมด และกักบริเวณ" },
-      { name: "💬 ห้องที่สแปม", value: `<#${channel.id}>` }
+      { name: "💬 ห้องที่เกิดเหตุ", value: `<#${channel.id}>` }
     )
     .setTimestamp();
   log.send({ embeds: [embed] }).catch(() => {});
 }
 
-// 🚫 4. ระบบตรวจจับการสแปม & ถอดยศ
+// 🚫 4. ระบบตรวจจับสแปม (คน & บอทอื่น)
 const spamMap = new Map();
 
 client.on("messageCreate", async (msg) => {
-  if (!msg.guild || msg.author.bot) return;
+  // ⛔ ข้ามบอทตัวเอง และบอทที่อยู่ใน Whitelist
+  if (msg.author.id === client.user.id) return;
+  if (whitelistedBots.includes(msg.author.id)) return;
+  if (!msg.guild) return;
   
-  // ข้าม Administrator เพื่อป้องกันบอทเอ๋อใส่เจ้าของเซิร์ฟ
-  if (msg.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+  // ⛔ ข้ามคนที่มีสิทธิ์ Administrator
+  if (msg.member?.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
   const id = msg.author.id;
   if (!spamMap.has(id)) spamMap.set(id, { count: 0, last: Date.now(), msgs: [] });
   const data = spamMap.get(id);
 
-  // Reset ถ้าหยุดพิมพ์เกิน 4 วินาที
+  // Reset ข้อมูลถ้าทิ้งช่วงพิมพ์นานเกิน 4 วินาที
   if (Date.now() - data.last > 4000) {
     data.count = 0;
     data.msgs = [];
@@ -63,40 +78,41 @@ client.on("messageCreate", async (msg) => {
   // 🚨 ตรวจพบการสแปม (5 ข้อความใน 4 วินาที)
   if (data.count >= 5) {
     try {
-      // 1. ลบข้อความที่สแปม
+      // 1. ลบข้อความที่สแปมทั้งหมด
       const deletable = data.msgs.filter(m => !m.deleted);
       if (deletable.length > 0) {
         await msg.channel.bulkDelete(deletable, true).catch(() => {});
       }
 
-      // 2. 🔥 ถอดยศทั้งหมดออกทันที
-      // กรองยศ @everyone ออก และยศที่บอทไม่มีสิทธิ์ถอด
+      // 2. ถอดยศทั้งหมดออกทันที
       const rolesToRemove = msg.member.roles.cache.filter(role => role.name !== "@everyone");
+      
       if (rolesToRemove.size > 0) {
-        await msg.member.roles.remove(rolesToRemove, "Spam Detected - Stripping all roles").catch(console.error);
+        await msg.member.roles.remove(rolesToRemove, "Spam Detected - Stripping all roles")
+          .then(() => console.log(`✅ Stripped roles from ${msg.author.tag}`))
+          .catch(err => console.error(`❌ Cannot strip roles: ${err.message}`));
       }
 
       // 3. ใส่ยศกักบริเวณ
-      await msg.member.roles.add(QUARANTINE_ROLE_ID, "Spam detected").catch(console.error);
+      await msg.member.roles.add(QUARANTINE_ROLE_ID, "Spam detected")
+        .catch(err => console.error(`❌ Cannot add quarantine role: ${err.message}`));
 
-      // 4. แจ้งเตือนในห้องนั้น
-      msg.channel.send(`❌ **${msg.author.tag}** ถูกถอดยศทั้งหมดและกักบริเวณข้อหาสแปม!`).catch(() => {});
+      // 4. แจ้งเตือนในห้องและส่ง Log
+      msg.channel.send(`⚠️ ตรวจพบการสแปมจาก **${msg.author.tag}** ทำการถอดยศและกักบริเวณทันที!`).catch(() => {});
+      sendLog(msg.guild, msg.member, "Automated Spam Protection", msg.channel);
 
-      // 5. ส่ง Log
-      sendLog(msg.guild, msg.member, "Spam detected", msg.channel);
-
-      // ล้าง Data เพื่อเริ่มนับใหม่ถ้าเขากลับมาสแปมอีก
+      // ล้างข้อมูลเพื่อเริ่มนับใหม่
       spamMap.delete(id);
 
     } catch (e) {
-      console.log("Error in Spam Logic:", e.message);
+      console.log("Error logic:", e.message);
     }
   }
 });
 
 // 🚀 5. เริ่มทำงาน
 client.once("ready", () => {
-  console.log(`🛡 ${client.user.tag} ONLINE - พร้อมถอดยศพวกสแปม!`);
+  console.log(`🛡 ${client.user.tag} ONLINE - เฝ้าระวังทั้งคนและบอท (ยกเว้น Whitelist แล้ว)`);
 });
 
 client.login(TOKEN);

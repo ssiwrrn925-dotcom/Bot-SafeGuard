@@ -1,24 +1,4 @@
-const http = require('http');
-http.createServer((req, res) => {
-  res.write("Bot is online!");
-  res.end();
-}).listen(8080);
-require("dotenv").config();
-
-const { Client, GatewayIntentBits, ChannelType } = require('discord.js');
-
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildVoiceStates
-  ]
-});
-
-const TOKEN = process.env.TOKEN;
-
-// 🧪 debug
-console.log("TOKEN LENGTH:", TOKEN?.length);
-
+const http = require("http");
 const {
   Client,
   GatewayIntentBits,
@@ -26,10 +6,16 @@ const {
   EmbedBuilder
 } = require("discord.js");
 
-const { token } = require("./config.json");
+// =====================
+// 🌐 KEEP ALIVE SERVER
+// =====================
+http.createServer((req, res) => {
+  res.write("Bot is online!");
+  res.end();
+}).listen(8080);
 
 // =====================
-// 🤖 CLIENT
+// 🤖 CLIENT & CONFIG
 // =====================
 const client = new Client({
   intents: [
@@ -40,9 +26,8 @@ const client = new Client({
   ]
 });
 
-// =====================
-// 📌 CONFIG
-// =====================
+// ดึงค่า TOKEN จาก Environment Variables ที่ตั้งไว้ใน Render
+const TOKEN = process.env.TOKEN;
 const LOG_CHANNEL_ID = "1499134140841197628";
 const QUARANTINE_ROLE_ID = "1496547872701943958";
 
@@ -53,7 +38,7 @@ const spamMap = new Map();
 let globalSpamAlert = false;
 
 // =====================
-// 📊 LOG
+// 📊 LOG FUNCTION
 // =====================
 function sendLog(guild, member, reason, channel) {
   const log = guild.channels.cache.get(LOG_CHANNEL_ID);
@@ -79,9 +64,7 @@ client.on("messageCreate", async (msg) => {
   if (!msg.guild || msg.author.bot) return;
 
   const member = msg.member;
-  if (!member) return;
-
-  if (member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+  if (!member || member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
   const id = msg.author.id;
 
@@ -91,7 +74,7 @@ client.on("messageCreate", async (msg) => {
 
   const data = spamMap.get(id);
 
-  // reset
+  // Reset counters
   if (Date.now() - data.last > 4000) {
     data.count = 0;
     data.msgs = [];
@@ -105,34 +88,25 @@ client.on("messageCreate", async (msg) => {
 
   const recent = data.msgs.filter(m => Date.now() - m.createdTimestamp < 5000);
 
-  // 🚨 detect spam
+  // 🚨 Detect spam
   if (recent.length >= 5) {
     try {
-      // 🧨 ลบข้อความ
       const deletable = data.msgs
         .filter(m => m && !m.deleted)
-        .filter(m => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000)
-        .slice(0, 100);
+        .filter(m => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000);
 
-      await msg.channel.bulkDelete(deletable, true).catch(() => {});
-
-      // 🚫 ใส่ยศกัก
-      await member.roles.add(QUARANTINE_ROLE_ID, "Spam detected").catch(() => {});
-
-      // 🚨 แจ้งแค่ 1 ครั้ง + แสดงชื่อคน
-      if (!globalSpamAlert) {
-        globalSpamAlert = true;
-
-        msg.channel.send(
-          `🚫 ตรวจพบการสแปม → ${member} (${member.user.tag}) ถูกกักบริเวณ`
-        ).catch(() => {});
-
-        setTimeout(() => {
-          globalSpamAlert = false;
-        }, 60000);
+      if (deletable.length > 0) {
+        await msg.channel.bulkDelete(deletable, true).catch(() => {});
       }
 
-      // 📊 log
+      await member.roles.add(QUARANTINE_ROLE_ID, "Spam detected").catch(() => {});
+
+      if (!globalSpamAlert) {
+        globalSpamAlert = true;
+        msg.channel.send(`🚫 ตรวจพบการสแปม → ${member} (${member.user.tag}) ถูกกักบริเวณ`).catch(() => {});
+        setTimeout(() => { globalSpamAlert = false; }, 60000);
+      }
+
       sendLog(msg.guild, member, "Spam detected (bulk delete)", msg.channel);
 
     } catch (err) {
@@ -147,7 +121,12 @@ client.on("messageCreate", async (msg) => {
 // 🚀 READY
 // =====================
 client.once("ready", () => {
-  console.log("🛡 SAFE GUARD FULL NAME DISPLAY ONLINE");
+  console.log(`🛡 ${client.user.tag} ONLINE & PROTECTING`);
 });
 
-client.login(token);
+// Login ด้วย TOKEN จาก Environment Variable
+if (TOKEN) {
+  client.login(TOKEN).catch(err => console.error("Login Error:", err.message));
+} else {
+  console.error("ERROR: TOKEN is missing in Environment Variables!");
+}

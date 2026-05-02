@@ -5,21 +5,32 @@ const {
   EmbedBuilder
 } = require("discord.js");
 
-// 🌐 แก้ปัญหา Render (ต้องมี port)
+// =====================
+// 🌐 EXPRESS (สำคัญสำหรับ Render)
+// =====================
 const express = require("express");
 const app = express();
 
-const PORT = process.env.PORT || 3000;
+// ❗ ห้าม fallback เป็น 3000
+const PORT = process.env.PORT;
+
+if (!PORT) {
+  console.error("❌ PORT not found (Render จะส่งมาให้เอง)");
+  process.exit(1);
+}
 
 app.get("/", (req, res) => {
   res.send("Bot is running!");
 });
 
-app.listen(PORT, () => {
+// 👇 ต้อง bind 0.0.0.0
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 Server running on port ${PORT}`);
 });
 
-// 🔐 ใช้ ENV แทน config.json
+// =====================
+// 🔐 TOKEN
+// =====================
 const token = process.env.TOKEN;
 
 if (!token) {
@@ -42,11 +53,8 @@ const client = new Client({
 // =====================
 // 📌 CONFIG
 // =====================
-const LOG_CHANNEL_ID =
-  process.env.LOG_CHANNEL_ID || "1499134140841197628";
-
-const QUARANTINE_ROLE_ID =
-  process.env.QUARANTINE_ROLE_ID || "1496547872701943958";
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
+const QUARANTINE_ROLE_ID = process.env.QUARANTINE_ROLE_ID;
 
 // =====================
 // 📌 DATA
@@ -58,6 +66,8 @@ let globalSpamAlert = false;
 // 📊 LOG
 // =====================
 function sendLog(guild, member, reason, channel) {
+  if (!LOG_CHANNEL_ID) return;
+
   const log = guild.channels.cache.get(LOG_CHANNEL_ID);
   if (!log) return;
 
@@ -146,9 +156,13 @@ client.once("ready", () => {
   console.log(`🛡 ONLINE: ${client.user.tag}`);
 });
 
+// =====================
 // 💥 กันบอทดับ
+// =====================
 process.on("unhandledRejection", console.error);
 process.on("uncaughtException", console.error);
 
+// =====================
 // 🔑 LOGIN
+// =====================
 client.login(token);

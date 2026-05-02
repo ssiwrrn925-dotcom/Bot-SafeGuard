@@ -1,9 +1,9 @@
 const http = require("http");
-const { Client, GatewayIntentBits, PermissionsBitField, EmbedBuilder } = require("discord.js");
+const { Client, GatewayIntentBits, PermissionsBitField, EmbedBuilder, AuditLogEvent } = require("discord.js");
 
-// 🌐 1. สร้าง Server เพื่อแก้ปัญหา Port Timeout ใน Render
+// 🌐 1. Server สำหรับ Keep-Alive (ป้องกันบอทหลับ)
 http.createServer((req, res) => {
-  res.write("Bot is running!");
+  res.write("Bot SafeGuard: Ultimate Security ONLINE");
   res.end();
 }).listen(8080);
 
@@ -13,7 +13,8 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildModeration
   ]
 });
 
@@ -21,98 +22,105 @@ const TOKEN = process.env.TOKEN;
 const LOG_CHANNEL_ID = "1499134140841197628";
 const QUARANTINE_ROLE_ID = "1496547872701943958";
 
-// ⚪️ รายชื่อ ID บอทที่อนุญาต (Whitelist) - บอทเหล่านี้จะสแปมได้ไม่โดนจัดการ
+// ⚪️ Whitelist: รายชื่อ ID บอทที่อนุญาตให้ทำงานได้ปกติ
 const whitelistedBots = [
-  "411916947773587456",
-  "1369921212062629939",
-  "493716749342998541",
-  "788814313930096662",
-  "491769129318088714",
-  "292953664492929025",
-  "240254129333731328",
-  "275813801792634880"
+  "411916947773587456", "1369921212062629939", "493716749342998541",
+  "788814313930096662", "491769129318088714", "292953664492929025",
+  "240254129333731328", "275813801792634880"
 ];
 
 // 📊 3. ระบบส่ง Log แจ้งเตือน
-function sendLog(guild, member, reason, channel) {
-  const log = guild.channels.cache.get(LOG_CHANNEL_ID);
-  if (!log) return;
+async function sendSecurityLog(guild, executor, action, targetName) {
+  const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID);
+  if (!logChannel) return;
   const embed = new EmbedBuilder()
-    .setTitle("🚨 ระบบป้องกันสแปม: ดำเนินการขั้นเด็ดขาด")
-    .setColor("DarkRed")
+    .setTitle("🛡️ ตรวจพบการบุกรุกและระงับสิทธิ์ทันที")
+    .setColor("Red")
     .addFields(
-      { name: "👤 ผู้กระทำ", value: `${member.user.tag} ${member.user.bot ? "🤖 (BOT)" : "👤 (USER)"}` },
-      { name: "📌 การดำเนินการ", value: "ถอดยศทั้งหมด และกักบริเวณ" },
-      { name: "💬 ห้องที่เกิดเหตุ", value: `<#${channel.id}>` }
+      { name: "👤 ผู้กระทำ", value: `${executor?.tag || "Unknown"} (${executor?.id || "N/A"})` },
+      { name: "🚫 การกระทำ", value: action },
+      { name: "📝 เป้าหมาย", value: targetName || "ไม่ระบุ" },
+      { name: "📌 สถานะ", value: "ลบสิ่งที่สร้าง + ถอดยศทั้งหมด + กักบริเวณเรียบร้อย" }
     )
     .setTimestamp();
-  log.send({ embeds: [embed] }).catch(() => {});
+  logChannel.send({ embeds: [embed] }).catch(() => {});
 }
 
-// 🚫 4. ระบบตรวจจับสแปม (คน & บอทอื่น)
-const spamMap = new Map();
+// 🚫 4. ฟังก์ชันลงโทษ (ถอดยศ + กักบริเวณ)
+async function punishExecutor(guild, executorId) {
+  try {
+    const member = await guild.members.fetch(executorId).catch(() => null);
+    if (!member) return;
+    if (member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+    if (executorId === client.user.id || whitelistedBots.includes(executorId)) return;
 
+    const rolesToRemove = member.roles.cache.filter(r => r.name !== "@everyone");
+    if (rolesToRemove.size > 0) await member.roles.remove(rolesToRemove).catch(() => {});
+    await member.roles.add(QUARANTINE_ROLE_ID).catch(() => {});
+  } catch (err) { console.log(`Error Punishing: ${err.message}`); }
+}
+
+// --- 🛡️ [ANTI-ALL CREATION] ตรวจจับการสร้างทุกอย่าง ---
+
+// กันสร้างห้อง
+client.on("channelCreate", async (channel) => {
+  const audit = await channel.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.ChannelCreate }).catch(() => null);
+  const entry = audit?.entries.first();
+  const executor = entry?.executor;
+  if (executor && executor.id !== client.user.id && !whitelistedBots.includes(executor.id)) {
+    await channel.delete().catch(() => {});
+    await punishExecutor(channel.guild, executor.id);
+    sendSecurityLog(channel.guild, executor, "สร้างห้อง (Channel)", channel.name);
+  }
+});
+
+// กันสร้างยศ
+client.on("roleCreate", async (role) => {
+  const audit = await role.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.RoleCreate }).catch(() => null);
+  const entry = audit?.entries.first();
+  const executor = entry?.executor;
+  if (executor && executor.id !== client.user.id && !whitelistedBots.includes(executor.id)) {
+    await role.delete().catch(() => {});
+    await punishExecutor(role.guild, executor.id);
+    sendSecurityLog(role.guild, executor, "สร้างยศ (Role)", role.name);
+  }
+});
+
+// กันสร้างเธรด (Public & Private)
+client.on("threadCreate", async (thread) => {
+  const ownerId = thread.ownerId;
+  if (ownerId && ownerId !== client.user.id && !whitelistedBots.includes(ownerId)) {
+    await thread.delete().catch(() => {});
+    await punishExecutor(thread.guild, ownerId);
+    const owner = await client.users.fetch(ownerId).catch(() => null);
+    sendSecurityLog(thread.guild, owner, "สร้างเธรด (Thread)", thread.name);
+  }
+});
+
+// --- 🛡️ [ANTI-SPAM] กันสแปมข้อความเรทสูง ---
+const spamMap = new Map();
 client.on("messageCreate", async (msg) => {
-  // ⛔ ข้ามบอทตัวเอง และบอทที่อยู่ใน Whitelist
-  if (msg.author.id === client.user.id) return;
-  if (whitelistedBots.includes(msg.author.id)) return;
-  if (!msg.guild) return;
-  
-  // ⛔ ข้ามคนที่มีสิทธิ์ Administrator
+  if (!msg.guild || msg.author.id === client.user.id || whitelistedBots.includes(msg.author.id)) return;
   if (msg.member?.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
   const id = msg.author.id;
-  if (!spamMap.has(id)) spamMap.set(id, { count: 0, last: Date.now(), msgs: [] });
+  const now = Date.now();
+  if (!spamMap.has(id)) spamMap.set(id, { count: 0, last: now, msgs: [] });
   const data = spamMap.get(id);
 
-  // Reset ข้อมูลถ้าทิ้งช่วงพิมพ์นานเกิน 4 วินาที
-  if (Date.now() - data.last > 4000) {
-    data.count = 0;
-    data.msgs = [];
-  }
-
+  if (now - data.last > 3000) { data.count = 0; data.msgs = []; }
   data.count++;
-  data.last = Date.now();
+  data.last = now;
   data.msgs.push(msg);
 
-  // 🚨 ตรวจพบการสแปม (5 ข้อความใน 4 วินาที)
-  if (data.count >= 5) {
-    try {
-      // 1. ลบข้อความที่สแปมทั้งหมด
-      const deletable = data.msgs.filter(m => !m.deleted);
-      if (deletable.length > 0) {
-        await msg.channel.bulkDelete(deletable, true).catch(() => {});
-      }
-
-      // 2. ถอดยศทั้งหมดออกทันที
-      const rolesToRemove = msg.member.roles.cache.filter(role => role.name !== "@everyone");
-      
-      if (rolesToRemove.size > 0) {
-        await msg.member.roles.remove(rolesToRemove, "Spam Detected - Stripping all roles")
-          .then(() => console.log(`✅ Stripped roles from ${msg.author.tag}`))
-          .catch(err => console.error(`❌ Cannot strip roles: ${err.message}`));
-      }
-
-      // 3. ใส่ยศกักบริเวณ
-      await msg.member.roles.add(QUARANTINE_ROLE_ID, "Spam detected")
-        .catch(err => console.error(`❌ Cannot add quarantine role: ${err.message}`));
-
-      // 4. แจ้งเตือนในห้องและส่ง Log
-      msg.channel.send(`⚠️ ตรวจพบการสแปมจาก **${msg.author.tag}** ทำการถอดยศและกักบริเวณทันที!`).catch(() => {});
-      sendLog(msg.guild, msg.member, "Automated Spam Protection", msg.channel);
-
-      // ล้างข้อมูลเพื่อเริ่มนับใหม่
-      spamMap.delete(id);
-
-    } catch (e) {
-      console.log("Error logic:", e.message);
-    }
+  if (data.count >= 4) {
+    const deletable = data.msgs.filter(m => !m.deleted);
+    if (deletable.length > 0) await msg.channel.bulkDelete(deletable, true).catch(() => {});
+    await punishExecutor(msg.guild, id);
+    msg.channel.send(`❌ **${msg.author.tag}** ถูกระงับสิทธิ์เนื่องจากพยายามก่อกวนเซิร์ฟเวอร์!`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+    spamMap.delete(id);
   }
 });
 
-// 🚀 5. เริ่มทำงาน
-client.once("ready", () => {
-  console.log(`🛡 ${client.user.tag} ONLINE - เฝ้าระวังทั้งคนและบอท (ยกเว้น Whitelist แล้ว)`);
-});
-
+client.once("ready", () => console.log(`🛡️ ${client.user.tag} ONLINE: ระบบป้องกันขั้นสูงสุดพร้อมทำงาน!`));
 client.login(TOKEN);

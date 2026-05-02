@@ -8,33 +8,11 @@ const {
 const express = require("express");
 const app = express();
 
-// =====================
-// 🌐 SERVER (Render)
-// =====================
-const PORT = process.env.PORT || 10000;
+// 🌐 ต้องมี Web Server ไว้บอก Render ว่าบอทยังทำงานอยู่
+app.get("/", (req, res) => res.send("Bot is Alive!"));
+app.listen(process.env.PORT || 10000);
 
-app.get("/", (req, res) => {
-  res.send("Bot-SafeGuard is running!");
-});
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🌐 Web Server starts on port ${PORT}`);
-});
-
-// =====================
-// 🔐 TOKEN CHECK
-// =====================
-const token = process.env.TOKEN;
-console.log("🔍 [SYSTEM] TOKEN CHECK:", token ? "FOUND (Value present) ✅" : "MISSING ❌");
-
-if (!token) {
-  console.error("❌ [CRITICAL] No TOKEN provided in Environment Variables!");
-  process.exit(1);
-}
-
-// =====================
-// 🤖 CLIENT SETUP
-// =====================
+// 🤖 CLIENT
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -44,20 +22,16 @@ const client = new Client({
   ]
 });
 
-// =====================
-// 📊 DATA & CONFIG
-// =====================
-const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
-const QUARANTINE_ROLE_ID = process.env.QUARANTINE_ROLE_ID;
+// 📌 CONFIG (ดึงจาก Environment ของ Render)
+const token = process.env.TOKEN;
+const LOG_CHANNEL_ID = "1499134140841197628";
+const QUARANTINE_ROLE_ID = "1496547872701943958";
 
 const spamMap = new Map();
 let globalSpamAlert = false;
 
-// =====================
 // 📊 LOG FUNCTION
-// =====================
 function sendLog(guild, member, reason, channel) {
-  if (!LOG_CHANNEL_ID) return;
   const log = guild.channels.cache.get(LOG_CHANNEL_ID);
   if (!log) return;
 
@@ -65,19 +39,16 @@ function sendLog(guild, member, reason, channel) {
     .setTitle("🚫 Anti-Spam System")
     .setColor("Red")
     .addFields(
-      { name: "👤 User", value: `${member.user.tag}` },
-      { name: "📌 Reason", value: reason },
-      { name: "💬 Channel", value: `<#${channel.id}>` },
-      { name: "⏰ Time", value: new Date().toLocaleString("th-TH") }
-    )
-    .setTimestamp();
+      { name: "👤 ผู้ใช้", value: `${member.user.tag} (${member.id})` },
+      { name: "📌 เหตุผล", value: reason },
+      { name: "💬 ห้อง", value: `<#${channel.id}>` },
+      { name: "⏰ เวลา", value: new Date().toLocaleString() }
+    );
 
-  log.send({ embeds: [embed] }).catch(err => console.error("❌ Error sending log:", err.message));
+  log.send({ embeds: [embed] }).catch(() => {});
 }
 
-// =====================
-// 🚫 ANTI SPAM LOGIC
-// =====================
+// 🚫 ANTI SPAM SYSTEM
 client.on("messageCreate", async (msg) => {
   if (!msg.guild || msg.author.bot) return;
 
@@ -86,83 +57,57 @@ client.on("messageCreate", async (msg) => {
 
   const id = msg.author.id;
   if (!spamMap.has(id)) {
-    spamMap.set(id, { msgs: [], last: Date.now() });
+    spamMap.set(id, { count: 0, last: Date.now(), msgs: [] });
   }
 
   const data = spamMap.get(id);
 
-  // Clear old data (5 seconds window)
-  if (Date.now() - data.last > 5000) {
+  if (Date.now() - data.last > 4000) {
+    data.count = 0;
     data.msgs = [];
   }
 
-  data.msgs.push(msg);
+  data.count++;
   data.last = Date.now();
+  data.msgs.push(msg);
 
   if (data.msgs.length > 10) data.msgs.shift();
-
-  const recent = data.msgs.filter(
-    (m) => Date.now() - m.createdTimestamp < 5000
-  );
+  const recent = data.msgs.filter(m => Date.now() - m.createdTimestamp < 5000);
 
   if (recent.length >= 5) {
     try {
-      // Delete spam messages
-      await msg.channel.bulkDelete(data.msgs.slice(0, 100), true).catch(() => {});
+      const deletable = data.msgs
+        .filter(m => m && !m.deleted)
+        .filter(m => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000)
+        .slice(0, 100);
 
-      // Add Quarantine Role
-      if (QUARANTINE_ROLE_ID) {
-        await member.roles.add(QUARANTINE_ROLE_ID).catch(err => 
-            console.error(`❌ Role Add Error: ${err.message}`)
-        );
-      }
+      await msg.channel.bulkDelete(deletable, true).catch(() => {});
+      await member.roles.add(QUARANTINE_ROLE_ID, "Spam detected").catch(() => {});
 
       if (!globalSpamAlert) {
         globalSpamAlert = true;
-        msg.channel.send(`🚫 **Spam detected** → ${member.user.tag} has been restricted.`)
-          .then(m => setTimeout(() => m.delete().catch(() => {}), 5000))
-          .catch(() => {});
-
+        msg.channel.send(`🚫 ตรวจพบการสแปม → ${member} (${member.user.tag}) ถูกกักบริเวณ`).catch(() => {});
         setTimeout(() => { globalSpamAlert = false; }, 60000);
       }
 
-      sendLog(msg.guild, member, "Spam detected (5+ messages in 5s)", msg.channel);
-
+      sendLog(msg.guild, member, "Spam detected (bulk delete)", msg.channel);
     } catch (err) {
-      console.error("❌ Anti-spam action error:", err);
+      console.log("Error:", err.message);
     }
   }
 
-  // Cleanup map memory
-  setTimeout(() => {
-    if(spamMap.has(id)) spamMap.delete(id);
-  }, 60000);
+  setTimeout(() => spamMap.delete(id), 60000);
 });
 
-// =====================
-// 🚀 READY & DEBUG
-// =====================
 client.once("ready", () => {
-  console.log("-----------------------------------------");
-  console.log(`🛡  ONLINE: ${client.user.tag}`);
-  console.log(`📡  Serving ${client.guilds.cache.size} servers`);
-  console.log("-----------------------------------------");
+  console.log("------------------------------------");
+  console.log("🛡 SAFE GUARD ONLINE (FIXED TOKEN)");
+  console.log("------------------------------------");
 });
 
-client.on("error", (err) => console.error("❌ [CLIENT ERROR]", err));
-client.on("warn", (warn) => console.warn("⚠️ [CLIENT WARN]", warn));
-
-// =====================
-// 🔑 LOGIN
-// =====================
-console.log("🚀 Starting login process...");
-
-client.login(token)
-  .then(() => {
-    console.log("✅ [SUCCESS] Discord Login Promise Resolved");
-  })
-  .catch((err) => {
-    console.error("❌ [LOGIN FAILED] Details below:");
-    console.error(err);
-    console.log("👉 Suggestion: Check if your TOKEN is still valid and Intents are ON in Dev Portal.");
-  });
+// ตรวจสอบ TOKEN ก่อน Login
+if (!token) {
+    console.error("❌ ERROR: TOKEN is missing in Render Environment!");
+} else {
+    client.login(token).catch(err => console.error("❌ LOGIN ERROR:", err.message));
+}

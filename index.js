@@ -9,14 +9,9 @@ const express = require("express");
 const app = express();
 
 // =====================
-// 🌐 PORT (Render ต้องใช้)
+// 🌐 SERVER (Render)
 // =====================
-const PORT = process.env.PORT;
-
-if (!PORT) {
-  console.error("❌ PORT not found");
-  process.exit(1);
-}
+const PORT = process.env.PORT || 10000;
 
 app.get("/", (req, res) => {
   res.send("Bot is running!");
@@ -79,7 +74,7 @@ function sendLog(guild, member, reason, channel) {
       { name: "⏰ Time", value: new Date().toLocaleString() }
     );
 
-  log.send({ embeds: [embed] }).catch(() => {});
+  log.send({ embeds: [embed] }).catch(console.error);
 }
 
 // =====================
@@ -116,9 +111,7 @@ client.on("messageCreate", async (msg) => {
 
   if (recent.length >= 5) {
     try {
-      const deletable = data.msgs.slice(0, 100);
-
-      await msg.channel.bulkDelete(deletable, true).catch(() => {});
+      await msg.channel.bulkDelete(data.msgs.slice(0, 100), true).catch(() => {});
 
       if (QUARANTINE_ROLE_ID) {
         await member.roles.add(QUARANTINE_ROLE_ID).catch(() => {});
@@ -127,9 +120,8 @@ client.on("messageCreate", async (msg) => {
       if (!globalSpamAlert) {
         globalSpamAlert = true;
 
-        msg.channel.send(
-          `🚫 Spam detected → ${member.user.tag}`
-        ).catch(() => {});
+        msg.channel.send(`🚫 Spam detected → ${member.user.tag}`)
+          .catch(() => {});
 
         setTimeout(() => {
           globalSpamAlert = false;
@@ -139,7 +131,7 @@ client.on("messageCreate", async (msg) => {
       sendLog(msg.guild, member, "Spam detected", msg.channel);
 
     } catch (err) {
-      console.error(err);
+      console.error("❌ Anti-spam error:", err);
     }
   }
 
@@ -154,20 +146,15 @@ client.once("ready", () => {
 });
 
 // =====================
-// 🔥 DEBUG (สำคัญ)
+// 🔥 DEBUG
 // =====================
-client.on("debug", console.log);
 client.on("error", console.error);
 client.on("warn", console.warn);
-
-// =====================
-// 💥 SAFETY
-// =====================
 process.on("unhandledRejection", console.error);
 process.on("uncaughtException", console.error);
 
 // =====================
-// 🔑 LOGIN (สำคัญมาก)
+// 🔑 LOGIN
 // =====================
 console.log("🚀 Starting login...");
 

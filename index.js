@@ -5,12 +5,12 @@ const {
   EmbedBuilder
 } = require("discord.js");
 
-// =====================
-// 🌐 EXPRESS (สำหรับ Render)
-// =====================
 const express = require("express");
 const app = express();
 
+// =====================
+// 🌐 PORT (Render ต้องใช้)
+// =====================
 const PORT = process.env.PORT;
 
 if (!PORT) {
@@ -32,7 +32,7 @@ app.listen(PORT, "0.0.0.0", () => {
 const token = process.env.TOKEN;
 
 if (!token) {
-  console.error("❌ TOKEN หาย ไปตั้งใน Render");
+  console.error("❌ TOKEN missing");
   process.exit(1);
 }
 
@@ -55,13 +55,13 @@ const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const QUARANTINE_ROLE_ID = process.env.QUARANTINE_ROLE_ID;
 
 // =====================
-// 📌 DATA
+// 📊 DATA
 // =====================
 const spamMap = new Map();
 let globalSpamAlert = false;
 
 // =====================
-// 📊 LOG
+// 📊 LOG FUNCTION
 // =====================
 function sendLog(guild, member, reason, channel) {
   if (!LOG_CHANNEL_ID) return;
@@ -73,10 +73,10 @@ function sendLog(guild, member, reason, channel) {
     .setTitle("🚫 Anti-Spam System")
     .setColor("Red")
     .addFields(
-      { name: "👤 ผู้ใช้", value: `${member.user.tag} (${member.id})` },
-      { name: "📌 เหตุผล", value: reason },
-      { name: "💬 ห้อง", value: `<#${channel.id}>` },
-      { name: "⏰ เวลา", value: new Date().toLocaleString() }
+      { name: "👤 User", value: `${member.user.tag}` },
+      { name: "📌 Reason", value: reason },
+      { name: "💬 Channel", value: `<#${channel.id}>` },
+      { name: "⏰ Time", value: new Date().toLocaleString() }
     );
 
   log.send({ embeds: [embed] }).catch(() => {});
@@ -96,19 +96,17 @@ client.on("messageCreate", async (msg) => {
   const id = msg.author.id;
 
   if (!spamMap.has(id)) {
-    spamMap.set(id, { count: 0, last: Date.now(), msgs: [] });
+    spamMap.set(id, { msgs: [], last: Date.now() });
   }
 
   const data = spamMap.get(id);
 
-  if (Date.now() - data.last > 4000) {
-    data.count = 0;
+  if (Date.now() - data.last > 5000) {
     data.msgs = [];
   }
 
-  data.count++;
-  data.last = Date.now();
   data.msgs.push(msg);
+  data.last = Date.now();
 
   if (data.msgs.length > 10) data.msgs.shift();
 
@@ -118,11 +116,10 @@ client.on("messageCreate", async (msg) => {
 
   if (recent.length >= 5) {
     try {
-      const deletable = data.msgs
-        .filter((m) => m && !m.deleted)
-        .slice(0, 100);
+      const deletable = data.msgs.slice(0, 100);
 
       await msg.channel.bulkDelete(deletable, true).catch(() => {});
+
       if (QUARANTINE_ROLE_ID) {
         await member.roles.add(QUARANTINE_ROLE_ID).catch(() => {});
       }
@@ -131,7 +128,7 @@ client.on("messageCreate", async (msg) => {
         globalSpamAlert = true;
 
         msg.channel.send(
-          `🚫 ตรวจพบการสแปม → ${member} (${member.user.tag}) ถูกกักบริเวณ`
+          `🚫 Spam detected → ${member.user.tag}`
         ).catch(() => {});
 
         setTimeout(() => {
@@ -142,7 +139,7 @@ client.on("messageCreate", async (msg) => {
       sendLog(msg.guild, member, "Spam detected", msg.channel);
 
     } catch (err) {
-      console.log("Error:", err.message);
+      console.error(err);
     }
   }
 
@@ -157,26 +154,22 @@ client.once("ready", () => {
 });
 
 // =====================
-// ❗ DEBUG EVENTS (สำคัญมาก)
+// 🔥 DEBUG (สำคัญ)
 // =====================
+client.on("debug", console.log);
 client.on("error", console.error);
 client.on("warn", console.warn);
-client.on("shardError", console.error);
 
 // =====================
-// 💥 กันบอทดับ
+// 💥 SAFETY
 // =====================
-process.on("unhandledRejection", (err) => {
-  console.error("UNHANDLED:", err);
-});
-process.on("uncaughtException", (err) => {
-  console.error("CRASH:", err);
-});
+process.on("unhandledRejection", console.error);
+process.on("uncaughtException", console.error);
 
 // =====================
-// 🔑 LOGIN (มี debug)
+// 🔑 LOGIN (สำคัญมาก)
 // =====================
-console.log("🚀 Starting bot login...");
+console.log("🚀 Starting login...");
 
 client.login(token)
   .then(() => {

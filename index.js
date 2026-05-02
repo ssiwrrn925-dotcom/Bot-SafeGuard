@@ -5,11 +5,9 @@ const {
   EmbedBuilder
 } = require("discord.js");
 
-const { token } = require("./config.json");
+// ✅ ใช้ ENV แทน config.json
+const token = process.env.TOKEN;
 
-// =====================
-// 🤖 CLIENT
-// =====================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -20,10 +18,10 @@ const client = new Client({
 });
 
 // =====================
-// 📌 CONFIG
+// 📌 CONFIG (ดึงจาก ENV ด้วยก็ดี)
 // =====================
-const LOG_CHANNEL_ID = "1499134140841197628";
-const QUARANTINE_ROLE_ID = "1496547872701943958";
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID || "1499134140841197628";
+const QUARANTINE_ROLE_ID = process.env.QUARANTINE_ROLE_ID || "1496547872701943958";
 
 // =====================
 // 📌 DATA
@@ -70,7 +68,6 @@ client.on("messageCreate", async (msg) => {
 
   const data = spamMap.get(id);
 
-  // reset
   if (Date.now() - data.last > 4000) {
     data.count = 0;
     data.msgs = [];
@@ -84,21 +81,16 @@ client.on("messageCreate", async (msg) => {
 
   const recent = data.msgs.filter(m => Date.now() - m.createdTimestamp < 5000);
 
-  // 🚨 detect spam
   if (recent.length >= 5) {
     try {
-      // 🧨 ลบข้อความ
       const deletable = data.msgs
         .filter(m => m && !m.deleted)
         .filter(m => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000)
         .slice(0, 100);
 
       await msg.channel.bulkDelete(deletable, true).catch(() => {});
-
-      // 🚫 ใส่ยศกัก
       await member.roles.add(QUARANTINE_ROLE_ID, "Spam detected").catch(() => {});
 
-      // 🚨 แจ้งแค่ 1 ครั้ง + แสดงชื่อคน
       if (!globalSpamAlert) {
         globalSpamAlert = true;
 
@@ -111,7 +103,6 @@ client.on("messageCreate", async (msg) => {
         }, 60000);
       }
 
-      // 📊 log
       sendLog(msg.guild, member, "Spam detected (bulk delete)", msg.channel);
 
     } catch (err) {
@@ -126,7 +117,13 @@ client.on("messageCreate", async (msg) => {
 // 🚀 READY
 // =====================
 client.once("ready", () => {
-  console.log("🛡 SAFE GUARD FULL NAME DISPLAY ONLINE");
+  console.log("🛡 SAFE GUARD ONLINE");
 });
+
+// ❗ กันพังถ้าไม่ได้ตั้ง TOKEN
+if (!token) {
+  console.error("❌ ไม่พบ TOKEN ใน Environment Variables");
+  process.exit(1);
+}
 
 client.login(token);

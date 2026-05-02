@@ -9,80 +9,86 @@ const client = new Client({
   ]
 });
 
-// --- ตั้งค่า ID และเกณฑ์การตรวจจับ ---
+// --- ตั้งค่า ID ---
 const TOKEN = process.env.TOKEN; 
-const LOG_CHANNEL_ID = "1499134140841197628"; // ห้องส่ง Log
-const QUARANTINE_ROLE_ID = "1496547872701943958"; // ยศกักบริเวณ
+const LOG_CHANNEL_ID = "1499134140841197628"; 
+const QUARANTINE_ROLE_ID = "1496547872701943958"; 
 
+// --- ตั้งค่าระบบตรวจจับ ---
 const messageCache = new Collection();
-const SPAM_THRESHOLD = 5; // ส่งเกิน 5 ข้อความ
+const SPAM_THRESHOLD = 4; // พิมพ์เกิน 4 ข้อความ
 const SPAM_INTERVAL = 3000; // ภายใน 3 วินาที
 
 client.on("messageCreate", async (message) => {
-  // ไม่ทำงานใน DM, ไม่ตรวจจับบอท, และไม่ตรวจจับคนที่มีสิทธิ์ Administrator
+  // ไม่ทำงานใน DM, ไม่ตรวจจับบอท, และไม่ตรวจจับ Administrator
   if (!message.guild || message.author.bot) return;
   if (message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
   const now = Date.now();
   const authorId = message.author.id;
-  const userData = messageCache.get(authorId) || { count: 0, lastMessage: now };
+  const userData = messageCache.get(authorId) || { count: 0, lastMessage: now, messages: [] };
+
+  // บันทึกข้อความที่ส่งมาเพื่อเตรียมลบทิ้ง
+  userData.messages.push(message);
 
   if (now - userData.lastMessage < SPAM_INTERVAL) {
     userData.count++;
   } else {
     userData.count = 1;
+    userData.messages = [message]; // เริ่มนับใหม่ ล้างรายการข้อความเก่า
   }
   userData.lastMessage = now;
   messageCache.set(authorId, userData);
 
-  // เมื่อตรวจพบการสแปมข้อความ
+  // 🔥 เมื่อตรวจพบการสแปม (ถึงจุดเดือด)
   if (userData.count >= SPAM_THRESHOLD) {
     const member = message.member;
     const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID);
 
     try {
-      // 1. ปลดยศทั้งหมดและใส่ยศกักบริเวณทันที
-      // ระบบจะทำการล้างยศเก่าออกหมด (Clear all roles) และใส่แค่ยศกักบริเวณอย่างเดียว
-      await member.roles.set([QUARANTINE_ROLE_ID], "ตรวจพบการสแปมข้อความ").catch(err => {
-        console.log(`[!] ปลดยศ <@${authorId}> ไม่สำเร็จ: ${err.message}`);
+      // 1. ลบข้อความสแปมทั้งหมดทันที
+      // ดึงข้อความทั้งหมดที่บันทึกไว้ในแคชมาลบทิ้ง
+      if (message.channel.permissionsFor(client.user).has(PermissionsBitField.Flags.ManageMessages)) {
+        userData.messages.forEach(msg => msg.delete().catch(() => {}));
+      }
+
+      // 2. ปลดยศทั้งหมดและใส่ยศกักบริเวณทันที
+      await member.roles.set([QUARANTINE_ROLE_ID], "กวาดล้างสแปมข้อความรัว").catch(err => {
+        console.log(`[!] ไม่สามารถปลดยศ <@${authorId}> ได้: ${err.message}`);
       });
 
-      // 2. แท็กประจานในห้องที่เกิดเหตุทันที
+      // 3. แท็กประจานในห้องที่เกิดเหตุ
       await message.channel.send({ 
-        content: `⚠️ **ระงับการใช้งาน:** <@${authorId}> คุณถูกปลดยศและกักบริเวณฐานสแปมข้อความรัว!` 
+        content: `🗑️ **กวาดล้างสแปม:** <@${authorId}> ข้อความของคุณถูกลบทั้งหมด และคุณถูกปลดยศกักบริเวณทันที!` 
       }).catch(() => {});
 
-      // 3. ส่ง Log รายงานพร้อมแท็กชื่อในห้อง Log
+      // 4. ส่ง Log และแท็กชื่อในห้อง Log
       if (logChannel) {
         const embed = new EmbedBuilder()
-          .setTitle("🔒 ดำเนินการกักบริเวณผู้สแปม")
-          .setColor("#ff9900")
+          .setTitle("🧹 ระบบกวาดล้างสแปมทำงาน")
+          .setColor("#ff0000")
           .setThumbnail(message.author.displayAvatarURL())
-          .addFields(
-            { name: "👤 ผู้กระทำผิด", value: `<@${authorId}> (ID: ${authorId})`, inline: true },
-            { name: "📝 พฤติกรรม", value: `ส่ง ${userData.count} ข้อความ ภายใน ${SPAM_INTERVAL / 1000} วินาที`, inline: true },
-            { name: "🛡️ การลงโทษ", value: "ปลดยศเดิมออกทั้งหมด + ใส่ยศกักบริเวณ" }
-          )
+          .setDescription(`**ผู้กระทำผิด:** <@${authorId}>\n**พฤติกรรม:** สแปมข้อความรัว (${userData.count} ข้อความ)`)
+          .addFields({ name: "การดำเนินการ", value: "✅ ลบข้อความสแปมทั้งหมดแล้ว\n✅ ปลดยศเดิมออกทั้งหมดแล้ว\n✅ ใส่ยศกักบริเวณแล้ว" })
           .setTimestamp();
 
         logChannel.send({ 
-          content: `🚨 **แจ้งรายงานการลงโทษ:** <@${authorId}> ถูกกักบริเวณเรียบร้อยแล้ว`, 
+          content: `🚨 **รายงานเหตุ:** <@${authorId}> ถูกกำจัดออกจากการใช้งานปกติเรียบร้อยแล้ว`, 
           embeds: [embed] 
         }).catch(() => {});
       }
 
-      // ล้างข้อมูลแคชสแปมของผู้ใช้คนนี้
+      // ล้างข้อมูลแคชหลังจัดการเสร็จ
       messageCache.delete(authorId);
 
     } catch (error) {
-      console.error(`เกิดข้อผิดพลาดในการจัดการสแปม: ${error.message}`);
+      console.error(`Error in Purge System: ${error.message}`);
     }
   }
 });
 
 client.once("ready", () => {
-  console.log(`✅ ระบบ Guardian Anti-Spam ออนไลน์แล้ว!`);
-  console.log(`📡 ตรวจจับที่: ${SPAM_THRESHOLD} ข้อความ / ${SPAM_INTERVAL / 1000} วินาที`);
+  console.log(`🧹 Purge Guardian Online: ${client.user.tag}`);
 });
 
 client.login(TOKEN);

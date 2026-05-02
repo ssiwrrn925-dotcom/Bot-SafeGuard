@@ -4,9 +4,17 @@ const {
   PermissionsBitField,
   EmbedBuilder
 } = require("discord.js");
+const http = require("http"); // เพิ่มเข้ามาเพื่อสร้าง Server หลอก
 
-// เปลี่ยนจาก require("./config.json") เป็นการดึงค่าจาก Environment Variable
-// เพื่อแก้ปัญหา Error ใน image_a57359.png และ image_a572c4.png
+// =====================
+// 🌐 KEEP ALIVE SERVER (แก้ปัญหา Port scan timeout ใน image_a56054.jpg)
+// =====================
+http.createServer((req, res) => {
+  res.write("Bot is running!");
+  res.end();
+}).listen(8080); 
+
+// ดึงค่าจาก Environment Variables ตามที่ตั้งไว้ใน image_a56342.png
 const token = process.env.TOKEN; 
 
 // =====================
@@ -22,10 +30,10 @@ const client = new Client({
 });
 
 // =====================
-// 📌 CONFIG
+// 📌 CONFIG (ดึงจาก Env หรือใส่ตรงก็ได้)
 // =====================
-const LOG_CHANNEL_ID = "1499134140841197628";
-const QUARANTINE_ROLE_ID = "1496547872701943958";
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID || "1499134140841197628";
+const QUARANTINE_ROLE_ID = process.env.QUARANTINE_ROLE_ID || "1496547872701943958";
 
 // =====================
 // 📌 DATA
@@ -72,7 +80,6 @@ client.on("messageCreate", async (msg) => {
 
   const data = spamMap.get(id);
 
-  // reset
   if (Date.now() - data.last > 4000) {
     data.count = 0;
     data.msgs = [];
@@ -86,10 +93,8 @@ client.on("messageCreate", async (msg) => {
 
   const recent = data.msgs.filter(m => Date.now() - m.createdTimestamp < 5000);
 
-  // 🚨 detect spam
   if (recent.length >= 5) {
     try {
-      // 🧨 ลบข้อความ
       const deletable = data.msgs
         .filter(m => m && !m.deleted)
         .filter(m => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000)
@@ -99,23 +104,14 @@ client.on("messageCreate", async (msg) => {
         await msg.channel.bulkDelete(deletable, true).catch(() => {});
       }
 
-      // 🚫 ใส่ยศกัก
       await member.roles.add(QUARANTINE_ROLE_ID, "Spam detected").catch(() => {});
 
-      // 🚨 แจ้งแค่ 1 ครั้ง + แสดงชื่อคน
       if (!globalSpamAlert) {
         globalSpamAlert = true;
-
-        msg.channel.send(
-          `🚫 ตรวจพบการสแปม → ${member} (${member.user.tag}) ถูกกักบริเวณ`
-        ).catch(() => {});
-
-        setTimeout(() => {
-          globalSpamAlert = false;
-        }, 60000);
+        msg.channel.send(`🚫 ตรวจพบการสแปม → ${member} (${member.user.tag}) ถูกกักบริเวณ`).catch(() => {});
+        setTimeout(() => { globalSpamAlert = false; }, 60000);
       }
 
-      // 📊 log
       sendLog(msg.guild, member, "Spam detected (bulk delete)", msg.channel);
 
     } catch (err) {
@@ -123,7 +119,6 @@ client.on("messageCreate", async (msg) => {
     }
   }
 
-  // ล้าง data ออกจากหน่วยความจำเมื่อผ่านไป 1 นาที
   setTimeout(() => spamMap.delete(id), 60000);
 });
 
@@ -134,7 +129,6 @@ client.once("ready", () => {
   console.log(`🛡 ${client.user.tag} ONLINE & PROTECTING`);
 });
 
-// ตรวจสอบว่ามี Token หรือไม่ก่อนรัน
 if (token) {
   client.login(token).catch(err => console.error("Login Error:", err.message));
 } else {

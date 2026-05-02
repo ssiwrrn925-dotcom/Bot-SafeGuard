@@ -6,16 +6,15 @@ const {
 } = require("discord.js");
 
 // =====================
-// 🌐 EXPRESS (สำคัญสำหรับ Render)
+// 🌐 EXPRESS (สำหรับ Render)
 // =====================
 const express = require("express");
 const app = express();
 
-// ❗ ห้าม fallback เป็น 3000
 const PORT = process.env.PORT;
 
 if (!PORT) {
-  console.error("❌ PORT not found (Render จะส่งมาให้เอง)");
+  console.error("❌ PORT not found");
   process.exit(1);
 }
 
@@ -23,7 +22,6 @@ app.get("/", (req, res) => {
   res.send("Bot is running!");
 });
 
-// 👇 ต้อง bind 0.0.0.0
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 Server running on port ${PORT}`);
 });
@@ -125,7 +123,9 @@ client.on("messageCreate", async (msg) => {
         .slice(0, 100);
 
       await msg.channel.bulkDelete(deletable, true).catch(() => {});
-      await member.roles.add(QUARANTINE_ROLE_ID).catch(() => {});
+      if (QUARANTINE_ROLE_ID) {
+        await member.roles.add(QUARANTINE_ROLE_ID).catch(() => {});
+      }
 
       if (!globalSpamAlert) {
         globalSpamAlert = true;
@@ -157,12 +157,31 @@ client.once("ready", () => {
 });
 
 // =====================
-// 💥 กันบอทดับ
+// ❗ DEBUG EVENTS (สำคัญมาก)
 // =====================
-process.on("unhandledRejection", console.error);
-process.on("uncaughtException", console.error);
+client.on("error", console.error);
+client.on("warn", console.warn);
+client.on("shardError", console.error);
 
 // =====================
-// 🔑 LOGIN
+// 💥 กันบอทดับ
 // =====================
-client.login(token);
+process.on("unhandledRejection", (err) => {
+  console.error("UNHANDLED:", err);
+});
+process.on("uncaughtException", (err) => {
+  console.error("CRASH:", err);
+});
+
+// =====================
+// 🔑 LOGIN (มี debug)
+// =====================
+console.log("🚀 Starting bot login...");
+
+client.login(token)
+  .then(() => {
+    console.log("✅ LOGIN SUCCESS");
+  })
+  .catch((err) => {
+    console.error("❌ LOGIN ERROR:", err);
+  });

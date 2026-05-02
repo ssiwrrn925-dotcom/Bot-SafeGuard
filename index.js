@@ -138,5 +138,10 @@ client.once("ready", () => {
 if (token) {
   client.login(token).catch(err => console.error("Login Error:", err.message));
 } else {
+  const http = require("http");
+http.createServer((req, res) => {
+  res.write("Bot is alive!");
+  res.end();
+}).listen(8080);
   console.error("ERROR: No TOKEN found in Environment Variables!");
 }

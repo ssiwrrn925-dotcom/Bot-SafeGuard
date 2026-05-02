@@ -5,9 +5,33 @@ const {
   EmbedBuilder
 } = require("discord.js");
 
-// ✅ ใช้ ENV แทน config.json
+// 🌐 Web server (กัน Render หลับ)
+const express = require("express");
+const app = express();
+
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+  res.send("🟢 Bot is running!");
+});
+
+app.listen(PORT, () => {
+  console.log(`🌐 Server running on port ${PORT}`);
+});
+
+// =====================
+// 🔐 ENV
+// =====================
 const token = process.env.TOKEN;
 
+if (!token) {
+  console.error("❌ ไม่พบ TOKEN ใน Environment Variables");
+  process.exit(1);
+}
+
+// =====================
+// 🤖 CLIENT
+// =====================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -18,13 +42,16 @@ const client = new Client({
 });
 
 // =====================
-// 📌 CONFIG (ดึงจาก ENV ด้วยก็ดี)
+// 📌 CONFIG
 // =====================
-const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID || "1499134140841197628";
-const QUARANTINE_ROLE_ID = process.env.QUARANTINE_ROLE_ID || "1496547872701943958";
+const LOG_CHANNEL_ID =
+  process.env.LOG_CHANNEL_ID || "1499134140841197628";
+
+const QUARANTINE_ROLE_ID =
+  process.env.QUARANTINE_ROLE_ID || "1496547872701943958";
 
 // =====================
-// 📌 DATA
+// 📊 DATA
 // =====================
 const spamMap = new Map();
 let globalSpamAlert = false;
@@ -50,7 +77,7 @@ function sendLog(guild, member, reason, channel) {
 }
 
 // =====================
-// 🚫 ANTI SPAM SYSTEM
+// 🚫 ANTI SPAM
 // =====================
 client.on("messageCreate", async (msg) => {
   if (!msg.guild || msg.author.bot) return;
@@ -79,32 +106,46 @@ client.on("messageCreate", async (msg) => {
 
   if (data.msgs.length > 10) data.msgs.shift();
 
-  const recent = data.msgs.filter(m => Date.now() - m.createdTimestamp < 5000);
+  const recent = data.msgs.filter(
+    (m) => Date.now() - m.createdTimestamp < 5000
+  );
 
   if (recent.length >= 5) {
     try {
       const deletable = data.msgs
-        .filter(m => m && !m.deleted)
-        .filter(m => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000)
+        .filter((m) => m && !m.deleted)
+        .filter(
+          (m) =>
+            Date.now() - m.createdTimestamp <
+            14 * 24 * 60 * 60 * 1000
+        )
         .slice(0, 100);
 
       await msg.channel.bulkDelete(deletable, true).catch(() => {});
-      await member.roles.add(QUARANTINE_ROLE_ID, "Spam detected").catch(() => {});
+      await member.roles
+        .add(QUARANTINE_ROLE_ID, "Spam detected")
+        .catch(() => {});
 
       if (!globalSpamAlert) {
         globalSpamAlert = true;
 
-        msg.channel.send(
-          `🚫 ตรวจพบการสแปม → ${member} (${member.user.tag}) ถูกกักบริเวณ`
-        ).catch(() => {});
+        msg.channel
+          .send(
+            `🚫 ตรวจพบการสแปม → ${member} (${member.user.tag}) ถูกกักบริเวณ`
+          )
+          .catch(() => {});
 
         setTimeout(() => {
           globalSpamAlert = false;
         }, 60000);
       }
 
-      sendLog(msg.guild, member, "Spam detected (bulk delete)", msg.channel);
-
+      sendLog(
+        msg.guild,
+        member,
+        "Spam detected (bulk delete)",
+        msg.channel
+      );
     } catch (err) {
       console.log("Error:", err.message);
     }
@@ -117,13 +158,16 @@ client.on("messageCreate", async (msg) => {
 // 🚀 READY
 // =====================
 client.once("ready", () => {
-  console.log("🛡 SAFE GUARD ONLINE");
+  console.log(`🛡 SAFE GUARD ONLINE: ${client.user.tag}`);
 });
 
-// ❗ กันพังถ้าไม่ได้ตั้ง TOKEN
-if (!token) {
-  console.error("❌ ไม่พบ TOKEN ใน Environment Variables");
-  process.exit(1);
-}
+// =====================
+// 💥 ERROR HANDLER
+// =====================
+process.on("unhandledRejection", console.error);
+process.on("uncaughtException", console.error);
 
+// =====================
+// 🔑 LOGIN
+// =====================
 client.login(token);

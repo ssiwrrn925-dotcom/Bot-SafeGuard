@@ -14,27 +14,26 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 app.get("/", (req, res) => {
-  res.send("Bot is running!");
+  res.send("Bot-SafeGuard is running!");
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🌐 Server running on port ${PORT}`);
+  console.log(`🌐 Web Server starts on port ${PORT}`);
 });
 
 // =====================
-// 🔐 TOKEN (DEBUG สำคัญ)
+// 🔐 TOKEN CHECK
 // =====================
 const token = process.env.TOKEN;
-
-console.log("🔍 TOKEN CHECK:", token ? "FOUND ✅" : "MISSING ❌");
+console.log("🔍 [SYSTEM] TOKEN CHECK:", token ? "FOUND (Value present) ✅" : "MISSING ❌");
 
 if (!token) {
-  console.error("❌ TOKEN missing → ไปใส่ใน Render ก่อน");
+  console.error("❌ [CRITICAL] No TOKEN provided in Environment Variables!");
   process.exit(1);
 }
 
 // =====================
-// 🤖 CLIENT
+// 🤖 CLIENT SETUP
 // =====================
 const client = new Client({
   intents: [
@@ -46,14 +45,11 @@ const client = new Client({
 });
 
 // =====================
-// 📌 CONFIG
+// 📊 DATA & CONFIG
 // =====================
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const QUARANTINE_ROLE_ID = process.env.QUARANTINE_ROLE_ID;
 
-// =====================
-// 📊 DATA
-// =====================
 const spamMap = new Map();
 let globalSpamAlert = false;
 
@@ -62,7 +58,6 @@ let globalSpamAlert = false;
 // =====================
 function sendLog(guild, member, reason, channel) {
   if (!LOG_CHANNEL_ID) return;
-
   const log = guild.channels.cache.get(LOG_CHANNEL_ID);
   if (!log) return;
 
@@ -73,31 +68,30 @@ function sendLog(guild, member, reason, channel) {
       { name: "👤 User", value: `${member.user.tag}` },
       { name: "📌 Reason", value: reason },
       { name: "💬 Channel", value: `<#${channel.id}>` },
-      { name: "⏰ Time", value: new Date().toLocaleString() }
-    );
+      { name: "⏰ Time", value: new Date().toLocaleString("th-TH") }
+    )
+    .setTimestamp();
 
-  log.send({ embeds: [embed] }).catch(console.error);
+  log.send({ embeds: [embed] }).catch(err => console.error("❌ Error sending log:", err.message));
 }
 
 // =====================
-// 🚫 ANTI SPAM
+// 🚫 ANTI SPAM LOGIC
 // =====================
 client.on("messageCreate", async (msg) => {
   if (!msg.guild || msg.author.bot) return;
 
   const member = msg.member;
-  if (!member) return;
-
-  if (member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+  if (!member || member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
   const id = msg.author.id;
-
   if (!spamMap.has(id)) {
     spamMap.set(id, { msgs: [], last: Date.now() });
   }
 
   const data = spamMap.get(id);
 
+  // Clear old data (5 seconds window)
   if (Date.now() - data.last > 5000) {
     data.msgs = [];
   }
@@ -113,57 +107,62 @@ client.on("messageCreate", async (msg) => {
 
   if (recent.length >= 5) {
     try {
+      // Delete spam messages
       await msg.channel.bulkDelete(data.msgs.slice(0, 100), true).catch(() => {});
 
+      // Add Quarantine Role
       if (QUARANTINE_ROLE_ID) {
-        await member.roles.add(QUARANTINE_ROLE_ID).catch(() => {});
+        await member.roles.add(QUARANTINE_ROLE_ID).catch(err => 
+            console.error(`❌ Role Add Error: ${err.message}`)
+        );
       }
 
       if (!globalSpamAlert) {
         globalSpamAlert = true;
-
-        msg.channel.send(`🚫 Spam detected → ${member.user.tag}`)
+        msg.channel.send(`🚫 **Spam detected** → ${member.user.tag} has been restricted.`)
+          .then(m => setTimeout(() => m.delete().catch(() => {}), 5000))
           .catch(() => {});
 
-        setTimeout(() => {
-          globalSpamAlert = false;
-        }, 60000);
+        setTimeout(() => { globalSpamAlert = false; }, 60000);
       }
 
-      sendLog(msg.guild, member, "Spam detected", msg.channel);
+      sendLog(msg.guild, member, "Spam detected (5+ messages in 5s)", msg.channel);
 
     } catch (err) {
-      console.error("❌ Anti-spam error:", err);
+      console.error("❌ Anti-spam action error:", err);
     }
   }
 
-  setTimeout(() => spamMap.delete(id), 60000);
+  // Cleanup map memory
+  setTimeout(() => {
+    if(spamMap.has(id)) spamMap.delete(id);
+  }, 60000);
 });
 
 // =====================
-// 🚀 READY
+// 🚀 READY & DEBUG
 // =====================
 client.once("ready", () => {
-  console.log(`🛡 ONLINE: ${client.user.tag}`);
+  console.log("-----------------------------------------");
+  console.log(`🛡  ONLINE: ${client.user.tag}`);
+  console.log(`📡  Serving ${client.guilds.cache.size} servers`);
+  console.log("-----------------------------------------");
 });
 
-// =====================
-// 🔥 DEBUG
-// =====================
-client.on("error", console.error);
-client.on("warn", console.warn);
-process.on("unhandledRejection", console.error);
-process.on("uncaughtException", console.error);
+client.on("error", (err) => console.error("❌ [CLIENT ERROR]", err));
+client.on("warn", (warn) => console.warn("⚠️ [CLIENT WARN]", warn));
 
 // =====================
 // 🔑 LOGIN
 // =====================
-console.log("🚀 Starting login...");
+console.log("🚀 Starting login process...");
 
 client.login(token)
   .then(() => {
-    console.log("✅ LOGIN SUCCESS");
+    console.log("✅ [SUCCESS] Discord Login Promise Resolved");
   })
   .catch((err) => {
-    console.error("❌ LOGIN ERROR:", err);
+    console.error("❌ [LOGIN FAILED] Details below:");
+    console.error(err);
+    console.log("👉 Suggestion: Check if your TOKEN is still valid and Intents are ON in Dev Portal.");
   });

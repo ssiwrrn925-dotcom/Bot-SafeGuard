@@ -1,64 +1,93 @@
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, EmbedBuilder, Collection, PermissionsBitField } = require("discord.js");
 const http = require("http");
 
-// ===== 🌐 Web Server (กัน Render หลับ) =====
+// --- 🌐 ระบบ Web Server เพื่อให้รันบน Render ได้ ---
 http.createServer((req, res) => {
-  res.writeHead(200);
-  res.end("Bot is running!");
-}).listen(process.env.PORT || 3000, () => {
-  console.log("🌐 Web Server is running...");
-});
+  res.write("Bot is running!");
+  res.end();
+}).listen(process.env.PORT || 3000); // Render จะใช้ Port นี้ในการเช็คสถานะ
 
-// ===== 🔥 เริ่ม Debug =====
-console.log("🚀 TEST BOT STARTING...");
-
-// ===== ❗ TOKEN =====
-const TOKEN = process.env.TOKEN;
-
-if (!TOKEN) {
-  console.error("❌ ไม่พบ TOKEN ใน Environment Variables");
-  process.exit(1);
-}
-
-// ===== 🤖 Client =====
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
+  intents: [
+    GatewayIntentBits.Guilds, 
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
 });
 
-// ===== ✅ READY =====
+// --- ⚙️ ตั้งค่า ID ---
+const TOKEN = process.env.TOKEN; 
+const LOG_CHANNEL_ID = "1499134140841197628"; 
+const QUARANTINE_ROLE_ID = "1496547872701943958"; 
+
+// --- 🛡️ ตั้งค่าระบบตรวจจับสแปม ---
+const messageCache = new Collection();
+const SPAM_THRESHOLD = 4; // พิมพ์เกิน 4 ข้อความ
+const SPAM_INTERVAL = 3000; // ภายใน 3 วินาที
+
+client.on("messageCreate", async (message) => {
+  if (!message.guild || message.author.bot) return;
+  if (message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
+  const now = Date.now();
+  const authorId = message.author.id;
+  const userData = messageCache.get(authorId) || { count: 0, lastMessage: now, messages: [] };
+
+  userData.messages.push(message);
+
+  if (now - userData.lastMessage < SPAM_INTERVAL) {
+    userData.count++;
+  } else {
+    userData.count = 1;
+    userData.messages = [message];
+  }
+  userData.lastMessage = now;
+  messageCache.set(authorId, userData);
+
+  // 🔥 เมื่อตรวจพบการสแปม
+  if (userData.count >= SPAM_THRESHOLD) {
+    const member = message.member;
+    const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID);
+
+    try {
+      // 1. ลบข้อความสแปมทั้งหมดทันที
+      if (message.channel.permissionsFor(client.user).has(PermissionsBitField.Flags.ManageMessages)) {
+        userData.messages.forEach(msg => msg.delete().catch(() => {}));
+      }
+
+      // 2. ปลดยศทั้งหมดและใส่ยศกักบริเวณ
+      await member.roles.set([QUARANTINE_ROLE_ID], "กวาดล้างสแปมข้อความรัว").catch(err => {
+        console.log(`[!] ปลดยศไม่ได้: ${err.message}`);
+      });
+
+      // 3. แท็กชื่อประจานในห้องเกิดเหตุ
+      await message.channel.send(`🗑️ **กวาดล้างสแปม:** <@${authorId}> ข้อความถูกลบ และคุณถูกปลดยศกักบริเวณทันที!`);
+
+      // 4. ส่งรายงานและแท็กชื่อในห้อง Log
+      if (logChannel) {
+        const embed = new EmbedBuilder()
+          .setTitle("🧹 ระบบกวาดล้างสแปมทำงาน (Render)")
+          .setColor("#ff0000")
+          .setDescription(`**ผู้กระทำผิด:** <@${authorId}>\n**พฤติกรรม:** สแปมข้อความรัว (${userData.count} ข้อความ)`)
+          .addFields({ name: "สถานะ", value: "✅ ลบข้อความแล้ว\n✅ ปลดยศแล้ว\n✅ กักบริเวณแล้ว" })
+          .setTimestamp();
+
+        logChannel.send({ 
+          content: `🚨 **รายงาน:** <@${authorId}> ถูกกักบริเวณเรียบร้อยแล้ว`, 
+          embeds: [embed] 
+        });
+      }
+
+      messageCache.delete(authorId);
+    } catch (error) {
+      console.error(`Error: ${error.message}`);
+    }
+  }
+});
+
 client.once("ready", () => {
-  console.log(`✅ READY: ${client.user.tag}`);
+  console.log(`🧹 Purge Guardian Online on Render: ${client.user.tag}`);
 });
 
-// ===== ❗ ERROR DEBUG =====
-client.on("error", (err) => {
-  console.error("❌ CLIENT ERROR:", err);
-});
-
-client.on("shardError", (err) => {
-  console.error("❌ SHARD ERROR:", err);
-});
-
-process.on("unhandledRejection", (err) => {
-  console.error("❌ UNHANDLED:", err);
-});
-
-// ===== 🌐 เช็คการเชื่อม Discord =====
-const https = require("https");
-
-https.get("https://discord.com/api/v10/gateway", (res) => {
-  console.log("🌐 Discord API Status:", res.statusCode);
-}).on("error", (e) => {
-  console.error("❌ ต่อ Discord ไม่ได้:", e.message);
-});
-
-// ===== 🚀 LOGIN =====
-console.log("🔄 กำลัง Login...");
-
-client.login(TOKEN)
-  .then(() => {
-    console.log("✅ LOGIN SUCCESS");
-  })
-  .catch((err) => {
-    console.error("❌ LOGIN ERROR:", err.message);
-  });
+client.login(TOKEN);

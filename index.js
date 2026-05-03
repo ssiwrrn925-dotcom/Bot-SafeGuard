@@ -1,12 +1,11 @@
 const { Client, GatewayIntentBits } = require("discord.js");
 const http = require("http");
 
-// สร้าง Server หลอกเพื่อให้ Render รู้ว่าบอทยังทำงาน
-const server = http.createServer((req, res) => {
+// สร้าง Server ให้ Render ตรวจสอบสถานะได้
+http.createServer((req, res) => {
   res.writeHead(200);
-  res.end("Bot Check Status: Online");
-});
-server.listen(process.env.PORT || 10000);
+  res.end("Bot is Active");
+}).listen(process.env.PORT || 10000);
 
 const client = new Client({
   intents: [
@@ -17,24 +16,14 @@ const client = new Client({
   ]
 });
 
-console.log("--- 🕵️ เริ่มระบบตรวจสอบเชิงลึก ---");
+console.log("--- 🕵️ กำลังพยายามเชื่อมต่อ Discord ---");
 
-client.on("ready", () => {
-  console.log(`✅ สำเร็จ 100%! บอทออนไลน์แล้วในชื่อ: ${client.user.tag}`);
+client.once("ready", () => {
+  console.log(`✅ สำเร็จ! ออนไลน์ในชื่อ: ${client.user.tag}`);
 });
 
-// ดักจับทุกความผิดพลาด
-process.on('unhandledRejection', error => {
-  console.error('❌ เกิดข้อผิดพลาดร้ายแรง:', error);
-});
-
+// บรรทัดนี้สำคัญมาก ห้ามแก้คำว่า process.env.TOKEN
 client.login(process.env.TOKEN).catch(err => {
-  console.error("❌ Login ล้มเหลว! สาเหตุจาก Discord:");
-  console.error(err.message);
-  
-  if (err.message.includes("used an invalid token")) {
-    console.error("👉 วิธีแก้: TOKEN ใน Render ผิดครับ ให้ไปก๊อปจาก Reset Token มาใหม่");
-  } else if (err.message.includes("privileged gateway intents")) {
-    console.error("👉 วิธีแก้: คุณเปิด Intents ในหน้า Developer Portal แล้วแต่ 'ลืมกดปุ่ม Save' ด้านล่างสุดครับ");
-  }
+  console.log("❌ Discord ปฏิเสธการเข้าถึง!");
+  console.log("เหตุผลจาก Discord: " + err.message);
 });

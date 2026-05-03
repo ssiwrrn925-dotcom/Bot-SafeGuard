@@ -1,9 +1,9 @@
 const { Client, GatewayIntentBits } = require("discord.js");
 const http = require("http");
 
-// --- Web Server สำหรับ Render ---
+// สร้าง Server สำหรับ Render
 http.createServer((req, res) => {
-  res.write("Bot is running!");
+  res.write("Bot is Online!");
   res.end();
 }).listen(process.env.PORT || 10000);
 
@@ -20,7 +20,16 @@ client.once("ready", () => {
   console.log(`✅ สำเร็จ! บอทออนไลน์แล้วในชื่อ: ${client.user.tag}`);
 });
 
-// ใช้ TOKEN จาก Environment Variables ใน Render
-client.login(process.env.TOKEN).catch(err => {
-  console.error("❌ Login ไม่สำเร็จ: " + err.message);
-});
+// ดึง Token จาก Environment
+const token = process.env.TOKEN;
+
+if (!token) {
+  console.error("❌ หาค่า TOKEN ใน Environment ไม่เจอ!");
+} else {
+  client.login(token).catch(err => {
+    console.error("❌ Discord ปฏิเสธการ Login: " + err.message);
+    if (err.message.includes("Privileged gateway intents")) {
+      console.error("👉 สาเหตุ: คุณลืมเปิด Intents ในหน้า Developer Portal (ต้อง Save ด้วยนะ)");
+    }
+  });
+}

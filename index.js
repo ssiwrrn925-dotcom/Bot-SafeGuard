@@ -1,13 +1,9 @@
-const { 
-    Client, 
-    GatewayIntentBits, 
-    EmbedBuilder 
-} = require("discord.js");
+const { Client, GatewayIntentBits, EmbedBuilder } = require("discord.js");
 const http = require('http');
 
-// 1. ระบบป้องกันบอทหลับสำหรับ Render
+// 1. ระบบ Web Server (พอร์ต 10000 สำหรับ Render)
 http.createServer((req, res) => {
-  res.write("Anti-Spam Bot is running!");
+  res.write("Anti-Spam Bot is Online!");
   res.end();
 }).listen(process.env.PORT || 10000);
 
@@ -20,15 +16,11 @@ const client = new Client({
   ],
 });
 
-// 2. การตั้งค่าระบบกันสแปม
-const spamMessages = new Map();
-const LIMIT = 5; // จำนวนข้อความสูงสุดที่อนุญาต
-const TIME_WINDOW = 5000; // ภายในเวลา 5 วินาที
-const QUARANTINE_ROLE_ID = "ใส่ไอดีบทบาทกักบริเวณตรงนี้"; // ไอดีบทบาทที่ใช้กักบริเวณ
-const LOG_CHANNEL_ID = "ใส่ไอดีห้องแจ้งเตือนตรงนี้"; // ไอดีห้องสำหรับลง Log
+// เก็บข้อมูลสแปม
+const messageLog = new Map();
 
 client.once("ready", () => {
-  console.log(`✅ บอทกันสแปมออนไลน์แล้ว: ${client.user.tag}`);
+  console.log(`✅ สำเร็จ! บอทออนไลน์แล้วในชื่อ: ${client.user.tag}`);
 });
 
 client.on("messageCreate", async (message) => {
@@ -36,50 +28,27 @@ client.on("messageCreate", async (message) => {
 
   const userId = message.author.id;
   const now = Date.now();
+  
+  if (!messageLog.has(userId)) messageLog.set(userId, []);
+  const timestamps = messageLog.get(userId);
+  timestamps.push(now);
 
-  if (!spamMessages.has(userId)) {
-    spamMessages.set(userId, []);
-  }
+  // ตรวจสอบ: ส่ง 5 ข้อความใน 5 วินาที
+  const recentMessages = timestamps.filter(t => now - t < 5000);
+  messageLog.set(userId, recentMessages);
 
-  const userMessages = spamMessages.get(userId);
-  userMessages.push(now);
-
-  // กรองเฉพาะข้อความที่ส่งภายในช่วงเวลาที่กำหนด
-  const recentMessages = userMessages.filter(timestamp => now - timestamp < TIME_WINDOW);
-  spamMessages.set(userId, recentMessages);
-
-  // ตรวจสอบว่าเกินขีดจำกัดหรือไม่
-  if (recentMessages.length >= LIMIT) {
+  if (recentMessages.length >= 5) {
     try {
-      // 1. ลบข้อความสแปม (ถ้ามีสิทธิ์)
-      await message.channel.bulkDelete(recentMessages.length).catch(() => null);
-
-      // 2. ให้บทบาทกักบริเวณ
-      const member = message.member;
-      const quarantineRole = message.guild.roles.cache.get(QUARANTINE_ROLE_ID);
-      
-      if (quarantineRole) {
-        await member.roles.add(quarantineRole);
-        
-        // 3. ส่ง Log แจ้งเตือน
-        const logChannel = client.channels.cache.get(LOG_CHANNEL_ID);
-        if (logChannel) {
-          const embed = new EmbedBuilder()
-            .setTitle("🚫 ตรวจพบการสแปม!")
-            .setDescription(`ผู้ใช้ <@${userId}> ถูกกักบริเวณเนื่องจากส่งข้อความรัวเกินไป`)
-            .setColor(0xff0000)
-            .setTimestamp();
-          logChannel.send({ embeds: [embed] });
-        }
-      }
-
-      // ล้างข้อมูลใน Map หลังจัดการแล้ว
-      spamMessages.delete(userId);
-      
+      await message.channel.send(`⚠️ <@${userId}> หยุดสแปม! คุณส่งข้อความรัวเกินไป`);
+      // ถ้าจะให้ถอดยศหรือเตะ ต้องใส่ ID ยศกักบริเวณเพิ่มครับ
+      messageLog.delete(userId);
     } catch (err) {
-      console.error("เกิดข้อผิดพลาดในการจัดการสแปม:", err);
+      console.log("Error handling spam: " + err.message);
     }
   }
 });
 
-client.login(process.env.TOKEN);
+// บรรทัดนี้ห้ามแก้! มันจะไปดึงค่าจากหน้า Environment เอง
+client.login(process.env.TOKEN).catch(err => {
+  console.log("❌ LOGIN FAILED: " + err.message);
+});

@@ -8,7 +8,7 @@ const {
 
 const http = require("http");
 
-// --- 🌐 Web Server กันบอทหลับ (Render) ---
+// --- 🌐 Web Server ---
 http.createServer((req, res) => {
   res.writeHead(200);
   res.end("Bot is running!");
@@ -16,18 +16,21 @@ http.createServer((req, res) => {
   console.log("🌐 Web Server is running...");
 });
 
-// --- ❗ ตรวจสอบ TOKEN ---
+// --- 🔥 DEBUG เริ่มต้น ---
+console.log("🚀 เริ่มรันบอท...");
+
+// --- TOKEN ---
 const TOKEN = process.env.TOKEN;
 if (!TOKEN) {
-  console.error("❌ ไม่พบ TOKEN ใน Render (Environment Variables)");
+  console.error("❌ ไม่พบ TOKEN");
   process.exit(1);
 }
 
-// --- ⚙️ ตั้งค่า ID ---
+// --- ID ---
 const LOG_CHANNEL_ID = "1499134140841197628"; 
 const QUARANTINE_ROLE_ID = "1496547872701943958"; 
 
-// --- 🤖 Client ---
+// --- Client ---
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds, 
@@ -37,17 +40,14 @@ const client = new Client({
   ]
 });
 
-// --- 🛡️ ระบบกันสแปม ---
+// --- Anti-Spam ---
 const messageCache = new Collection();
 const SPAM_THRESHOLD = 4;
 const SPAM_INTERVAL = 3000;
 
 client.on("messageCreate", async (message) => {
   if (!message.guild || message.author.bot) return;
-
-  // กัน error กรณี member null
   if (!message.member) return;
-
   if (message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
   const now = Date.now();
@@ -76,65 +76,57 @@ client.on("messageCreate", async (message) => {
     const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID);
 
     try {
-      // ลบข้อความ
       if (message.channel.permissionsFor(client.user).has(PermissionsBitField.Flags.ManageMessages)) {
         for (const msg of userData.messages) {
           await msg.delete().catch(() => {});
         }
       }
 
-      // กักบริเวณ (เปลี่ยนยศ)
       await member.roles.set([QUARANTINE_ROLE_ID]).catch(err => {
         console.log(`❌ ปลดยศไม่ได้: ${err.message}`);
       });
 
-      await message.channel.send(
-        `🗑️ <@${authorId}> สแปมข้อความ → ถูกลบข้อความ + กักบริเวณแล้ว`
-      );
+      await message.channel.send(`🗑️ <@${authorId}> ถูกกักบริเวณแล้ว`);
 
-      // ส่ง log
       if (logChannel) {
         const embed = new EmbedBuilder()
-          .setTitle("🧹 ระบบ Anti-Spam")
+          .setTitle("🧹 Anti-Spam")
           .setColor("#ff0000")
-          .setDescription(
-            `👤 ผู้ใช้: <@${authorId}>\n📊 จำนวน: ${userData.count} ข้อความ`
-          )
-          .addFields({
-            name: "สถานะ",
-            value: "✅ ลบข้อความ\n✅ กักบริเวณ"
-          })
+          .setDescription(`👤 <@${authorId}> (${userData.count} ข้อความ)`)
           .setTimestamp();
 
-        await logChannel.send({
-          content: `🚨 แจ้งเตือนสแปม`,
-          embeds: [embed]
-        });
+        await logChannel.send({ embeds: [embed] });
       }
 
       messageCache.delete(authorId);
 
     } catch (error) {
-      console.error(`❌ Error: ${error.message}`);
+      console.error("❌ ERROR:", error);
     }
   }
 });
 
-// --- ✅ บอทออนไลน์ ---
+// --- READY ---
 client.once("ready", () => {
-  console.log(`✅ บอทออนไลน์แล้ว: ${client.user.tag}`);
+  console.log(`✅ READY: ${client.user.tag}`);
 });
 
-// --- 🚀 Login ---
+// --- ERROR DEBUG ---
+client.on("error", console.error);
+
+client.on("shardError", error => {
+  console.error("❌ SHARD ERROR:", error);
+});
+
+process.on("unhandledRejection", err => {
+  console.error("❌ UNHANDLED:", err);
+});
+
+// --- LOGIN (มีครั้งเดียว!) ---
 console.log("🔄 กำลัง Login...");
-client.login(TOKEN).catch(err => {
-  console.error("❌ Login ไม่สำเร็จ:");
-  console.error(err.message);
 
-  if (err.message.includes("An invalid token")) {
-    console.error("👉 TOKEN ผิด");
-  }
-  if (err.message.includes("Privileged intent")) {
-    console.error("👉 ไปเปิด Intent ใน Discord Developer Portal");
-  }
-});
+client.login(TOKEN)
+  .then(() => console.log("✅ LOGIN SUCCESS"))
+  .catch(err => {
+    console.error("❌ LOGIN ERROR:", err);
+  });

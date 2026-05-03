@@ -1,30 +1,32 @@
-const { Client, GatewayIntentBits, EmbedBuilder, Collection, PermissionsBitField } = require("discord.js");
+const { 
+  Client, GatewayIntentBits, EmbedBuilder, Collection, 
+  PermissionsBitField 
+} = require("discord.js");
 const http = require("http");
+require("dotenv").config();
 
-// --- 🌐 ระบบ Web Server เพื่อให้รันบน Render ได้ ---
+// --- 🌐 ระบบ Web Server สำหรับ Render (Port 10000) ---
 http.createServer((req, res) => {
-  res.write("Bot is running!");
+  res.write("Anti-Spam System is Online");
   res.end();
-}).listen(process.env.PORT || 3000); // Render จะใช้ Port นี้ในการเช็คสถานะ
+}).listen(process.env.PORT || 10000, "0.0.0.0");
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds, 
-    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMembers, // สำคัญมากสำหรับการจัดการยศ
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent
   ]
 });
 
-// --- ⚙️ ตั้งค่า ID ---
+// --- ⚙️ ตั้งค่าไอดี (นำมาจาก Discord ของคุณ) ---
 const TOKEN = process.env.TOKEN; 
 const LOG_CHANNEL_ID = "1499134140841197628"; 
-const QUARANTINE_ROLE_ID = "1496547872701943958"; 
+const QUARANTINE_ROLE_ID = "1496547872701943958"; // ไอดีพนักงานสอบสวน/กักบริเวณ
 
-// --- 🛡️ ตั้งค่าระบบตรวจจับสแปม ---
+// --- 🛡️ ระบบตรวจจับ ---
 const messageCache = new Collection();
-const SPAM_THRESHOLD = 4; // พิมพ์เกิน 4 ข้อความ
-const SPAM_INTERVAL = 3000; // ภายใน 3 วินาที
 
 client.on("messageCreate", async (message) => {
   if (!message.guild || message.author.bot) return;
@@ -36,7 +38,7 @@ client.on("messageCreate", async (message) => {
 
   userData.messages.push(message);
 
-  if (now - userData.lastMessage < SPAM_INTERVAL) {
+  if (now - userData.lastMessage < 3000) { // ภายใน 3 วินาที
     userData.count++;
   } else {
     userData.count = 1;
@@ -45,49 +47,49 @@ client.on("messageCreate", async (message) => {
   userData.lastMessage = now;
   messageCache.set(authorId, userData);
 
-  // 🔥 เมื่อตรวจพบการสแปม
-  if (userData.count >= SPAM_THRESHOLD) {
+  // 🔥 เมื่อสแปมครบ 4 ข้อความ
+  if (userData.count >= 4) {
     const member = message.member;
     const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID);
 
     try {
-      // 1. ลบข้อความสแปมทั้งหมดทันที
+      // 1. ลบข้อความสแปม
       if (message.channel.permissionsFor(client.user).has(PermissionsBitField.Flags.ManageMessages)) {
         userData.messages.forEach(msg => msg.delete().catch(() => {}));
       }
 
-      // 2. ปลดยศทั้งหมดและใส่ยศกักบริเวณ
-      await member.roles.set([QUARANTINE_ROLE_ID], "กวาดล้างสแปมข้อความรัว").catch(err => {
-        console.log(`[!] ปลดยศไม่ได้: ${err.message}`);
-      });
+      // 2. ✨ ขั้นตอนถอดยศและกักบริเวณ ✨
+      // การใช้ .roles.set([ID]) จะเป็นการลบยศเดิม "ทั้งหมด" และแทนที่ด้วยยศที่ระบุทันที
+      await member.roles.set([QUARANTINE_ROLE_ID], "กวาดล้างสแปม: ถอดยศอัตโนมัติ");
 
-      // 3. แท็กชื่อประจานในห้องเกิดเหตุ
-      await message.channel.send(`🗑️ **กวาดล้างสแปม:** <@${authorId}> ข้อความถูกลบ และคุณถูกปลดยศกักบริเวณทันที!`);
+      // 3. ประกาศในห้องเกิดเหตุ
+      await message.channel.send(`⚠️ **ลงโทษขั้นเด็ดขาด:** <@${authorId}> ถูกถอดยศทั้งหมดและกักบริเวณเนื่องจากพฤติกรรมสแปม!`);
 
-      // 4. ส่งรายงานและแท็กชื่อในห้อง Log
+      // 4. ส่งหลักฐานลงห้อง Log
       if (logChannel) {
         const embed = new EmbedBuilder()
-          .setTitle("🧹 ระบบกวาดล้างสแปมทำงาน (Render)")
+          .setTitle("🧹 รายงานการถอดยศและกักบริเวณ")
           .setColor("#ff0000")
-          .setDescription(`**ผู้กระทำผิด:** <@${authorId}>\n**พฤติกรรม:** สแปมข้อความรัว (${userData.count} ข้อความ)`)
-          .addFields({ name: "สถานะ", value: "✅ ลบข้อความแล้ว\n✅ ปลดยศแล้ว\n✅ กักบริเวณแล้ว" })
+          .setThumbnail(message.author.displayAvatarURL())
+          .addFields(
+            { name: "👤 ผู้กระทำผิด", value: `<@${authorId}> (${authorId})`, inline: true },
+            { name: "🚫 การลงโทษ", value: "ถอดยศเดิมทั้งหมด + ใส่ยศกักบริเวณ", inline: true },
+            { name: "📊 จำนวนข้อความ", value: `${userData.count} ข้อความ/3วินาที`, inline: false }
+          )
           .setTimestamp();
 
-        logChannel.send({ 
-          content: `🚨 **รายงาน:** <@${authorId}> ถูกกักบริเวณเรียบร้อยแล้ว`, 
-          embeds: [embed] 
-        });
+        logChannel.send({ content: `🚨 **ตรวจพบสแปม:** <@${authorId}>`, embeds: [embed] });
       }
 
       messageCache.delete(authorId);
     } catch (error) {
-      console.error(`Error: ${error.message}`);
+      console.error(`[!] Error: ${error.message}`);
     }
   }
 });
 
 client.once("ready", () => {
-  console.log(`🧹 Purge Guardian Online on Render: ${client.user.tag}`);
+  console.log(`🧹 ระบบกวาดล้างสแปม (ถอดยศอัตโนมัติ) พร้อมใช้งาน: ${client.user.tag}`);
 });
 
 client.login(TOKEN);
